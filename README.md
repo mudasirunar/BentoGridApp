@@ -88,7 +88,7 @@ The application strictly follows the **MVVM (Model-View-ViewModel)** architectur
 
 ### Dynamic Bento Grid
 <p align="center">
-  <img src="app/screenshots/collection_srceen.jpg" width="300"/>
+  <img src="app/screenshots/collection_screen.jpg" width="300"/>
 </p>
 
 * **Collection Screen**: Showcases the intelligent Bento Grid layout in action. The grid automatically aligns various shapes (Squares, Wides, Talls) to completely fill empty spaces. It also demonstrates how a cover image can be used as a deeply immersive background.
