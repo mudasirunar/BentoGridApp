@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources xmlns:tools="http://schemas.android.com/tools">
+
+    <style name="Theme.BentoApp" parent="Theme.Material3.DayNight.NoActionBar">
+        <item name="colorPrimary">@color/BentoPrimary</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+    </style>
+
+    <style name="Theme.App.Starting" parent="Theme.SplashScreen">
+        <item name="windowSplashScreenBackground">@color/splashBackground</item>
+        <item name="windowSplashScreenAnimatedIcon">@drawable/ic_splash_animated</item>
+        <item name="windowSplashScreenIconBackgroundColor">@color/splashIconBackground</item>
+        <item name="postSplashScreenTheme">@style/Theme.BentoApp</item>
+    </style>
+
+</resources>

@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- These override the values/colors.xml entries in dark mode -->
+    <color name="BentoPrimary">#A78BFA</color>
+    <color name="BentoBackground">#0D0B1A</color>
+
+    <!-- Splash colors — dark variants -->
+    <color name="splashBackground">#0D0B1A</color>
+    <color name="splashIconBackground">#1E1A35</color>
+</resources>

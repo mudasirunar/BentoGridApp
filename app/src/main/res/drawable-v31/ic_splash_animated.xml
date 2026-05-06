@@ -1,0 +1,270 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    ANIMATED VERSION — drawable-v31/ic_splash_animated.xml
+    API 31+ only. Ring now matches static logo exactly:
+      - strokeWidth="4"  (matches the 4dp thick filled donut in ic_launcher_foreground)
+      - strokeColor="#33FFFFFF"  (matches fillColor of static ring)
+      - path radius 34dp  (midpoint between outer r=36 and inner r=32)
+-->
+<animated-vector
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt">
+
+    <aapt:attr name="android:drawable">
+        <vector
+            android:width="108dp"
+            android:height="108dp"
+            android:viewportWidth="108"
+            android:viewportHeight="108">
+
+            <!-- Glow ring — stroked at midpoint of static donut, same colour/thickness -->
+            <group android:name="ring">
+                <path
+                    android:name="ringPath"
+                    android:fillColor="@android:color/transparent"
+                    android:strokeColor="#33FFFFFF"
+                    android:strokeWidth="4"
+                    android:trimPathStart="0"
+                    android:trimPathEnd="0"
+                    android:pathData="M54,20 A34,34 0 1,0 54.001,20 Z" />
+            </group>
+
+            <!-- Top-left large tile — hidden at start -->
+            <group
+                android:name="tile1"
+                android:pivotX="40"
+                android:pivotY="41"
+                android:scaleX="0"
+                android:scaleY="0">
+                <path
+                    android:fillColor="#FFFFFFFF"
+                    android:pathData="M30,30 L50,30 Q52,30 52,32 L52,50 Q52,52 50,52 L30,52 Q28,52 28,50 L28,32 Q28,30 30,30Z" />
+                <path
+                    android:fillColor="#7C3AED"
+                    android:pathData="M36,38 Q36,35 39,35 L43,35 Q46,35 46,38 L46,44 Q46,47 43,47 L39,47 Q36,47 36,44Z" />
+            </group>
+
+            <!-- Top-right wide tile — hidden at start -->
+            <group
+                android:name="tile2"
+                android:pivotX="67"
+                android:pivotY="38.5"
+                android:scaleX="0"
+                android:scaleY="0">
+                <path
+                    android:fillColor="#CCF3E8FF"
+                    android:pathData="M56,30 L78,30 Q80,30 80,32 L80,45 Q80,47 78,47 L56,47 Q54,47 54,45 L54,32 Q54,30 56,30Z" />
+            </group>
+
+            <!-- Bottom-left wide tile — hidden at start -->
+            <group
+                android:name="tile3"
+                android:pivotX="39"
+                android:pivotY="64.5"
+                android:scaleX="0"
+                android:scaleY="0">
+                <path
+                    android:fillColor="#CCE9D5FF"
+                    android:pathData="M28,56 L50,56 Q52,56 52,58 L52,71 Q52,73 50,73 L28,73 Q26,73 26,71 L26,58 Q26,56 28,56Z" />
+            </group>
+
+            <!-- Bottom-right large tile — hidden at start -->
+            <group
+                android:name="tile4"
+                android:pivotX="67"
+                android:pivotY="65.5"
+                android:scaleX="0"
+                android:scaleY="0">
+                <path
+                    android:fillColor="#FFFFFFFF"
+                    android:pathData="M56,51 L78,51 Q80,51 80,53 L80,78 Q80,80 78,80 L56,80 Q54,80 54,78 L54,53 Q54,51 56,51Z" />
+                <path
+                    android:fillColor="#A78BFA"
+                    android:pathData="M62,60 Q62,57 65,57 L71,57 Q74,57 74,60 L74,66 Q74,69 71,69 L65,69 Q62,69 62,66Z" />
+            </group>
+
+        </vector>
+    </aapt:attr>
+
+    <!-- Ring: starts at 200ms, linear sweep, stays complete -->
+    <target android:name="ringPath">
+        <aapt:attr name="android:animation">
+            <objectAnimator
+                android:propertyName="trimPathEnd"
+                android:valueFrom="0"
+                android:valueTo="1"
+                android:startOffset="200"
+                android:duration="800"
+                android:interpolator="@android:interpolator/linear" />
+        </aapt:attr>
+    </target>
+
+    <!-- TILE 1: pops at 0ms, breathes at 660ms, phase 0ms -->
+    <target android:name="tile1">
+        <aapt:attr name="android:animation">
+            <set android:ordering="sequentially">
+                <set>
+                    <objectAnimator
+                        android:propertyName="scaleX"
+                        android:valueFrom="0"
+                        android:valueTo="1"
+                        android:startOffset="0"
+                        android:duration="300"
+                        android:interpolator="@android:interpolator/overshoot" />
+                    <objectAnimator
+                        android:propertyName="scaleY"
+                        android:valueFrom="0"
+                        android:valueTo="1"
+                        android:startOffset="0"
+                        android:duration="300"
+                        android:interpolator="@android:interpolator/overshoot" />
+                </set>
+                <set android:startOffset="360">
+                    <objectAnimator
+                        android:propertyName="scaleX"
+                        android:valueFrom="1"
+                        android:valueTo="1.07"
+                        android:duration="900"
+                        android:repeatCount="-1"
+                        android:repeatMode="reverse"
+                        android:interpolator="@android:interpolator/accelerate_decelerate" />
+                    <objectAnimator
+                        android:propertyName="scaleY"
+                        android:valueFrom="1"
+                        android:valueTo="1.07"
+                        android:duration="900"
+                        android:repeatCount="-1"
+                        android:repeatMode="reverse"
+                        android:interpolator="@android:interpolator/accelerate_decelerate" />
+                </set>
+            </set>
+        </aapt:attr>
+    </target>
+
+    <!-- TILE 2: pops at 120ms, breathes at 660ms, phase +225ms -->
+    <target android:name="tile2">
+        <aapt:attr name="android:animation">
+            <set android:ordering="sequentially">
+                <set>
+                    <objectAnimator
+                        android:propertyName="scaleX"
+                        android:valueFrom="0"
+                        android:valueTo="1"
+                        android:startOffset="120"
+                        android:duration="300"
+                        android:interpolator="@android:interpolator/overshoot" />
+                    <objectAnimator
+                        android:propertyName="scaleY"
+                        android:valueFrom="0"
+                        android:valueTo="1"
+                        android:startOffset="120"
+                        android:duration="300"
+                        android:interpolator="@android:interpolator/overshoot" />
+                </set>
+                <set android:startOffset="465">
+                    <objectAnimator
+                        android:propertyName="scaleX"
+                        android:valueFrom="1"
+                        android:valueTo="1.07"
+                        android:duration="900"
+                        android:repeatCount="-1"
+                        android:repeatMode="reverse"
+                        android:interpolator="@android:interpolator/accelerate_decelerate" />
+                    <objectAnimator
+                        android:propertyName="scaleY"
+                        android:valueFrom="1"
+                        android:valueTo="1.07"
+                        android:duration="900"
+                        android:repeatCount="-1"
+                        android:repeatMode="reverse"
+                        android:interpolator="@android:interpolator/accelerate_decelerate" />
+                </set>
+            </set>
+        </aapt:attr>
+    </target>
+
+    <!-- TILE 3: pops at 240ms, breathes at 660ms, phase +450ms -->
+    <target android:name="tile3">
+        <aapt:attr name="android:animation">
+            <set android:ordering="sequentially">
+                <set>
+                    <objectAnimator
+                        android:propertyName="scaleX"
+                        android:valueFrom="0"
+                        android:valueTo="1"
+                        android:startOffset="240"
+                        android:duration="300"
+                        android:interpolator="@android:interpolator/overshoot" />
+                    <objectAnimator
+                        android:propertyName="scaleY"
+                        android:valueFrom="0"
+                        android:valueTo="1"
+                        android:startOffset="240"
+                        android:duration="300"
+                        android:interpolator="@android:interpolator/overshoot" />
+                </set>
+                <set android:startOffset="570">
+                    <objectAnimator
+                        android:propertyName="scaleX"
+                        android:valueFrom="1"
+                        android:valueTo="1.07"
+                        android:duration="900"
+                        android:repeatCount="-1"
+                        android:repeatMode="reverse"
+                        android:interpolator="@android:interpolator/accelerate_decelerate" />
+                    <objectAnimator
+                        android:propertyName="scaleY"
+                        android:valueFrom="1"
+                        android:valueTo="1.07"
+                        android:duration="900"
+                        android:repeatCount="-1"
+                        android:repeatMode="reverse"
+                        android:interpolator="@android:interpolator/accelerate_decelerate" />
+                </set>
+            </set>
+        </aapt:attr>
+    </target>
+
+    <!-- TILE 4: pops at 360ms, breathes immediately, phase +675ms -->
+    <target android:name="tile4">
+        <aapt:attr name="android:animation">
+            <set android:ordering="sequentially">
+                <set>
+                    <objectAnimator
+                        android:propertyName="scaleX"
+                        android:valueFrom="0"
+                        android:valueTo="1"
+                        android:startOffset="360"
+                        android:duration="300"
+                        android:interpolator="@android:interpolator/overshoot" />
+                    <objectAnimator
+                        android:propertyName="scaleY"
+                        android:valueFrom="0"
+                        android:valueTo="1"
+                        android:startOffset="360"
+                        android:duration="300"
+                        android:interpolator="@android:interpolator/overshoot" />
+                </set>
+                <set android:startOffset="675">
+                    <objectAnimator
+                        android:propertyName="scaleX"
+                        android:valueFrom="1"
+                        android:valueTo="1.07"
+                        android:duration="900"
+                        android:repeatCount="-1"
+                        android:repeatMode="reverse"
+                        android:interpolator="@android:interpolator/accelerate_decelerate" />
+                    <objectAnimator
+                        android:propertyName="scaleY"
+                        android:valueFrom="1"
+                        android:valueTo="1.07"
+                        android:duration="900"
+                        android:repeatCount="-1"
+                        android:repeatMode="reverse"
+                        android:interpolator="@android:interpolator/accelerate_decelerate" />
+                </set>
+            </set>
+        </aapt:attr>
+    </target>
+
+</animated-vector>
