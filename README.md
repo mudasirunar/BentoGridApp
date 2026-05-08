@@ -108,7 +108,7 @@ The application strictly follows the **MVVM (Model-View-ViewModel)** architectur
 ## ⚙️ Installation Steps
 1. **Clone the repository:**
    ```bash
-   git clone https://github.com/yourusername/bento-grid.git
+   git clone https://github.com/mudasirunar/BentoGridApp.git
    ```
 2. **Open in Android Studio:**
    Open Android Studio, select `File > Open`, and navigate to the cloned `bento-grid` directory.
