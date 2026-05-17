@@ -13,6 +13,9 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import kotlinx.coroutines.launch
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -73,18 +76,22 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.bentoapp.R
 import com.example.bentoapp.data.ProjectEntity
+import com.example.bentoapp.data.BentoEntity
 import com.example.bentoapp.ui.components.AddProjectDialog
 import com.example.bentoapp.ui.components.BentoEmptyAnimation
 import com.example.bentoapp.ui.components.BentoFab
 import com.example.bentoapp.ui.components.ProjectCard
-import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun MainDashboard(
+fun DashboardScreen(
     projects: List<ProjectEntity>,
+    projectCounts: Map<Int, com.example.bentoapp.data.ProjectCounts>,
     onProjectClick: (ProjectEntity) -> Unit,
     onProjectCreated: suspend (String, String, Boolean, Int) -> ProjectEntity,
+    onProjectDeletedImmediate: (ProjectEntity, (List<BentoEntity>) -> Unit) -> Unit,
+    onUndoProjectDelete: (ProjectEntity, List<BentoEntity>) -> Unit,
+    onProjectDeleteConfirm: (ProjectEntity, List<BentoEntity>) -> Unit,
     onProjectDeleted: (ProjectEntity) -> Unit,
     onProjectUpdated: (ProjectEntity, String, Boolean, Int) -> Unit
 ) {
@@ -111,6 +118,7 @@ fun MainDashboard(
     var projectToDelete by rememberSaveable(stateSaver = ProjectSaver) { mutableStateOf(null) }
 
     val pendingDeletions = remember { mutableStateMapOf<Int, ProjectEntity>() }
+    val cachedProjectTiles = remember { mutableStateMapOf<Int, List<BentoEntity>>() }
     var activeDeletionJob by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
 
     val listState = androidx.compose.foundation.lazy.rememberLazyListState()
@@ -161,8 +169,12 @@ fun MainDashboard(
     DisposableEffect(Unit) {
         onDispose {
             activeDeletionJob?.cancel()
-            pendingDeletions.forEach { (_, project) -> onProjectDeleted(project) }
+            pendingDeletions.forEach { (id, project) ->
+                val tiles = cachedProjectTiles[id] ?: emptyList()
+                onProjectDeleteConfirm(project, tiles)
+            }
             pendingDeletions.clear()
+            cachedProjectTiles.clear()
         }
     }
 
@@ -201,13 +213,11 @@ fun MainDashboard(
         previousVisibleSize = visibleProjects.size
     }
 
-    // Root box — full screen
     Box(
         modifier = Modifier
             .fillMaxSize()
             .background(MaterialTheme.colorScheme.background)
     ) {
-        // ── Scaffold has NO topBar — content fills full screen ──
         Scaffold(
             containerColor = Color.Transparent,
             contentColor = MaterialTheme.colorScheme.onBackground,
@@ -243,9 +253,7 @@ fun MainDashboard(
                         contentPadding = PaddingValues(
                             start = 20.dp,
                             end = 20.dp,
-                            // Top offset accounts for the overlaid top bar height (~100dp)
                             top = 100.dp,
-                            // Reduced — just enough to clear FAB (80dp) + comfortable gap
                             bottom = 100.dp
                         ),
                         verticalArrangement = Arrangement.spacedBy(12.dp)
@@ -263,6 +271,7 @@ fun MainDashboard(
                             ) {
                                 ProjectCard(
                                     project = project,
+                                    counts = projectCounts[project.id],
                                     onClick = { onProjectClick(project) },
                                     onDeleteRequest = { projectToDelete = project },
                                     onEditRequest = { projectToEdit = project },
@@ -422,8 +431,17 @@ fun MainDashboard(
                                 projectToDelete = null
 
                                 activeDeletionJob?.cancel()
-                                pendingDeletions.forEach { (_, pending) -> onProjectDeleted(pending) }
+                                pendingDeletions.forEach { (id, pending) ->
+                                    val tiles = cachedProjectTiles[id] ?: emptyList()
+                                    onProjectDeleteConfirm(pending, tiles)
+                                }
                                 pendingDeletions.clear()
+                                cachedProjectTiles.clear()
+
+                                // 1. Immediately delete from DB & cache the fetched tiles in memory
+                                onProjectDeletedImmediate(deletedProject) { tiles ->
+                                    cachedProjectTiles[deletedProject.id] = tiles
+                                }
                                 pendingDeletions[deletedProject.id] = deletedProject
 
                                 activeDeletionJob = scope.launch {
@@ -435,11 +453,18 @@ fun MainDashboard(
                                     when (result) {
                                         SnackbarResult.ActionPerformed -> {
                                             triggerHaptic("TICK")
+                                            // Restore project and its tiles back to DB
+                                            val tiles = cachedProjectTiles[deletedProject.id] ?: emptyList()
+                                            onUndoProjectDelete(deletedProject, tiles)
                                             pendingDeletions.remove(deletedProject.id)
+                                            cachedProjectTiles.remove(deletedProject.id)
                                         }
                                         SnackbarResult.Dismissed -> {
-                                            onProjectDeleted(deletedProject)
+                                            // Finalize: delete physical cover and tile images from storage
+                                            val tiles = cachedProjectTiles[deletedProject.id] ?: emptyList()
+                                            onProjectDeleteConfirm(deletedProject, tiles)
                                             pendingDeletions.remove(deletedProject.id)
+                                            cachedProjectTiles.remove(deletedProject.id)
                                         }
                                     }
                                     activeDeletionJob = null
@@ -524,28 +549,26 @@ private fun DashboardTopBar(isScrolled: Boolean) {
     )
 
     val logoScale by animateFloatAsState(
-        targetValue = if (isScrolled) 1.15f else 1f,
-        animationSpec = spring(
-            dampingRatio = Spring.DampingRatioMediumBouncy,
-            stiffness = Spring.StiffnessMedium
-        ),
+        targetValue = if (isScrolled) 0.86f else 1f,
+        animationSpec = tween(durationMillis = 280, easing = FastOutSlowInEasing),
         label = "logoScale"
     )
 
     Box(
         modifier = Modifier
             .fillMaxWidth()
-            .background(MaterialTheme.colorScheme.surface.copy(alpha = bgAlpha))
-            .background(MaterialTheme.colorScheme.onSurface.copy(alpha = bgAlpha * 0.03f))
             .drawWithContent {
                 drawContent()
+                // Bottom border line — modern glassmorphism feel
                 drawRect(
-                    color = Color.White,
-                    topLeft = androidx.compose.ui.geometry.Offset(0f, size.height - 0.7.dp.toPx()),
-                    size = androidx.compose.ui.geometry.Size(size.width, 0.7.dp.toPx()),
-                    alpha = bgAlpha * 0.07f
+                    color = Color.White.copy(alpha = if (isScrolled) 0.08f else 0f),
+                    topLeft = Offset(0f, size.height - 1f),
+                    size = Size(size.width, 1f)
                 )
             }
+            .background(
+                color = MaterialTheme.colorScheme.background.copy(alpha = bgAlpha)
+            )
             .statusBarsPadding()
             .padding(horizontal = 24.dp)
             .padding(top = 20.dp, bottom = 16.dp)

@@ -37,7 +37,8 @@ data class BentoEntity(
     val isContentBold: Boolean = false,
     val isContentItalic: Boolean = false,
     val isContentUnderline: Boolean = false,
-    val contentSizeOffset: Int = 0
+    val contentSizeOffset: Int = 0,
+    val originalImageUrl: String? = null
 ) {
     val shape: TileShape get() = TileShape.fromIndex(shapeIndex)
 }

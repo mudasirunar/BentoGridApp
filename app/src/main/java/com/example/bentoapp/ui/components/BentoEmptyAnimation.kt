@@ -35,7 +35,7 @@ import com.example.bentoapp.ui.theme.TileViolet
 /**
  * Reusable animated empty state illustration.
  * A bento box whose lid pops open, sending coloured tiles drifting upward — loops forever.
- * Drop into any empty state: MainDashboard, CollectionDetailScreen, etc.
+ * Drop into any empty state: DashboardScreen, CollectionDetailScreen, etc.
  *
  * Usage:
  *   BentoEmptyAnimation(modifier = Modifier.size(140.dp))

@@ -156,7 +156,7 @@ fun AddProjectDialog(
                             )
                             Text(
                                 // Dynamic subtitle
-                                text = if (isEditMode) "Update name or cover" else "Add a name and cover",
+                                text = if (isEditMode) "Update project details" else "Set up your project",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f),
                                 letterSpacing = 0.sp

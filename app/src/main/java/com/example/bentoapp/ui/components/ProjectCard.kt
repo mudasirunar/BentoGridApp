@@ -36,6 +36,7 @@ import kotlin.math.roundToInt
 @Composable
 fun ProjectCard(
     project: ProjectEntity,
+    counts: com.example.bentoapp.data.ProjectCounts?,
     onClick: () -> Unit,
     onDeleteRequest: () -> Unit,
     onEditRequest: () -> Unit,
@@ -46,6 +47,7 @@ fun ProjectCard(
     val triggerThreshold = -160f
     var hasVibrated by remember { mutableStateOf(false) }
     var isLongPress by remember { mutableStateOf(false) }
+    var lastClickTime by remember { androidx.compose.runtime.mutableLongStateOf(0L) }
 
     val animatedOffset by animateFloatAsState(
         targetValue = dragOffset,
@@ -143,7 +145,11 @@ fun ProjectCard(
                     .combinedClickable(
                         onClick = {
                             if (!isLongPress) {
-                                onClick()
+                                val now = System.currentTimeMillis()
+                                if (now - lastClickTime > 500) {
+                                    lastClickTime = now
+                                    onClick()
+                                }
                             }
                             isLongPress = false
                         },
@@ -155,7 +161,6 @@ fun ProjectCard(
                     ),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                // Thumbnail — tap opens edit, no extra vibration
                 Box(
                     modifier = Modifier
                         .padding(10.dp)
@@ -214,12 +219,26 @@ fun ProjectCard(
                             overflow = TextOverflow.Ellipsis
                         )
                     }
-                    Spacer(Modifier.height(5.dp))
+
+                    Spacer(Modifier.height(4.dp))
+                    val tilesCount = counts?.tiles ?: 0
+                    val imagesCount = counts?.images ?: 0
                     Text(
-                        text = "Tap to see details",
+                        text = if (tilesCount == 0) "Empty collection"
+                               else {
+                                   val tStr = if (tilesCount == 1) "1 tile" else "$tilesCount tiles"
+                                   if (imagesCount == 0) tStr
+                                   else {
+                                       val iStr = if (imagesCount == 1) "1 image" else "$imagesCount images"
+                                       "$tStr • $iStr"
+                                   }
+                               },
+                        modifier = Modifier.padding(start = 6.dp),
                         style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f),
-                        letterSpacing = 0.sp
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f),
+                        fontWeight = FontWeight.Medium,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
                     )
                 }
 

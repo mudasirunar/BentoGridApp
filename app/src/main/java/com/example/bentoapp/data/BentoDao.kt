@@ -3,11 +3,20 @@ package com.example.bentoapp.data
 import androidx.room.*
 import kotlinx.coroutines.flow.Flow
 
+data class ProjectCounts(
+    val projectId: Int,
+    val tiles: Int,
+    val images: Int
+)
+
 @Dao
 interface BentoDao {
     // --- Project Methods ---
     @Query("SELECT * FROM projects ORDER BY id DESC")
     fun getAllProjects(): Flow<List<ProjectEntity>>
+
+    @Query("SELECT projectId, COUNT(id) as tiles, SUM(CASE WHEN imageUri IS NOT NULL AND imageUri != '' THEN 1 ELSE 0 END) as images FROM bento_tiles GROUP BY projectId")
+    fun getAllProjectCounts(): Flow<List<ProjectCounts>>
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertProject(project: ProjectEntity): Long

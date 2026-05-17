@@ -33,6 +33,11 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.DoneAll
+import androidx.compose.material.icons.filled.RemoveCircleOutline
 import androidx.compose.material3.BottomSheetDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -45,6 +50,10 @@ import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.TextButton
+import androidx.compose.foundation.clickable
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -81,6 +90,7 @@ import com.example.bentoapp.ui.components.BentoFab
 import com.example.bentoapp.ui.components.BentoGrid
 import com.example.bentoapp.ui.components.BentoLightbox
 import com.example.bentoapp.ui.components.BentoLoadingView
+import com.example.bentoapp.ui.theme.BentoSelectGreen
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.first
@@ -96,6 +106,8 @@ fun CollectionDetailScreen(
     onBackClick: () -> Unit,
     onAddTileClick: (Int) -> Unit,
     onEditTileClick: (Int, Int) -> Unit,
+    onDeleteTileImmediate: (BentoEntity) -> Unit,
+    onUndoDeleteTile: (BentoEntity) -> Unit,
     onDeleteTileConfirm: (BentoEntity) -> Unit,
     navController: NavController
 ) {
@@ -107,6 +119,9 @@ fun CollectionDetailScreen(
 
     // STATE FOR LIGHTBOX
     var selectedLightboxIndex by rememberSaveable { mutableStateOf<Int?>(null) }
+    var reopenViewerForTileId by rememberSaveable { mutableStateOf<Int?>(null) }
+    var reopenViewerFallbackIndex by rememberSaveable { mutableStateOf<Int?>(null) }
+    var editedFromViewer by rememberSaveable { mutableStateOf(false) }
     var isViewerUiActive by remember { mutableStateOf(false) }
 
     val configuration = androidx.compose.ui.platform.LocalConfiguration.current
@@ -198,6 +213,10 @@ fun CollectionDetailScreen(
     val pendingDeletions = remember { mutableStateMapOf<Int, BentoEntity>() }
     var activeDeletionJob by remember { mutableStateOf<Job?>(null) }
 
+    var isSelectionMode by rememberSaveable { mutableStateOf(false) }
+    val selectedTileIds = remember { mutableStateMapOf<Int, Boolean>() }
+    var showMultiDeleteDialog by remember { mutableStateOf(false) }
+
 
     // FILTER TILES WITH IMAGES
     val imageTiles = remember(tiles, pendingDeletions.size) {
@@ -210,12 +229,40 @@ fun CollectionDetailScreen(
         imageTiles.map { it.imageUri!! }
     }
 
+    LaunchedEffect(imageTiles, tiles) {
+        if (tiles != null && imageTiles.isEmpty() && selectedLightboxIndex != null && !editedFromViewer) {
+            selectedLightboxIndex = null
+        }
+    }
+
+    // Reopen lightbox if we edited a tile FROM THE VIEWER
+    LaunchedEffect(imageTiles, reopenViewerForTileId) {
+        if (reopenViewerForTileId != null && editedFromViewer) {
+            val idx = imageTiles.indexOfFirst { it.id == reopenViewerForTileId }
+            if (idx != -1) {
+                // Same tile still has an image — reopen on it
+                selectedLightboxIndex = idx
+            } else if (imageTiles.isNotEmpty()) {
+                // Image was removed but others exist — show nearest
+                val fallback = reopenViewerFallbackIndex ?: 0
+                selectedLightboxIndex = fallback.coerceIn(0, imageTiles.lastIndex)
+            } else {
+                // No images left — stay on collection screen, don't open viewer
+                selectedLightboxIndex = null
+            }
+            reopenViewerForTileId = null
+            reopenViewerFallbackIndex = null
+            editedFromViewer = false
+        }
+    }
+
 
     // --- 2. CLEANUP ON DISPOSE ---
     // If user leaves the screen while a snackbar is showing, finalize the delete!
     DisposableEffect(Unit) {
         onDispose {
             activeDeletionJob?.cancel()
+            // Finalize: clean up the physical image files on disk
             pendingDeletions.forEach { (_, tile) -> onDeleteTileConfirm(tile) }
             pendingDeletions.clear()
         }
@@ -236,7 +283,12 @@ fun CollectionDetailScreen(
 
     // ---  DELETE LOGIC ---
     val handleTileDeletion: (BentoEntity, Int?) -> Unit = { tile, reopenTileIdParam ->
-    activeDeletionJob?.cancel()
+        activeDeletionJob?.cancel()
+        
+        // 1. Immediately delete from DB so abrupt process closure does not resurrect it
+        onDeleteTileImmediate(tile)
+        
+        // 2. Keep in-memory cache for Undo capability
         pendingDeletions[tile.id] = tile
 
         activeDeletionJob = scope.launch {
@@ -248,6 +300,8 @@ fun CollectionDetailScreen(
             when (result) {
                 SnackbarResult.ActionPerformed -> {
                     triggerHaptic("TICK")
+                    // Restore to DB
+                    onUndoDeleteTile(tile)
                     if (reopenTileIdParam != null && selectedLightboxIndex != null) {
                         reopenTileId  = tile.id
                         reopenRequest++          // always changes → effect always re-runs
@@ -255,9 +309,47 @@ fun CollectionDetailScreen(
                     pendingDeletions.remove(tile.id)
                 }
                 SnackbarResult.Dismissed -> {
+                    // Finalize: delete physical image file
                     onDeleteTileConfirm(tile)
                     kotlinx.coroutines.delay(100)
                     pendingDeletions.remove(tile.id)
+                }
+            }
+            activeDeletionJob = null
+        }
+    }
+
+    val handleMultiDeletion: (List<BentoEntity>) -> Unit = { tilesToDelete ->
+        activeDeletionJob?.cancel()
+        val count = tilesToDelete.size
+        
+        // 1. Immediately delete all selected from DB so abrupt process closure does not resurrect them
+        tilesToDelete.forEach { onDeleteTileImmediate(it) }
+        
+        // 2. Keep in-memory cache for Undo capability
+        tilesToDelete.forEach { pendingDeletions[it.id] = it }
+        
+        isSelectionMode = false
+        selectedTileIds.clear()
+
+        activeDeletionJob = scope.launch {
+            val result = snackbarHostState.showSnackbar(
+                message = if (count == 1) "Tile removed" else "$count tiles removed",
+                actionLabel = "Undo",
+                duration = SnackbarDuration.Short
+            )
+            when (result) {
+                SnackbarResult.ActionPerformed -> {
+                    triggerHaptic("TICK")
+                    // Restore all to DB
+                    tilesToDelete.forEach { onUndoDeleteTile(it) }
+                    tilesToDelete.forEach { pendingDeletions.remove(it.id) }
+                }
+                SnackbarResult.Dismissed -> {
+                    // Finalize: delete physical image files
+                    tilesToDelete.forEach { onDeleteTileConfirm(it) }
+                    kotlinx.coroutines.delay(100)
+                    tilesToDelete.forEach { pendingDeletions.remove(it.id) }
                 }
             }
             activeDeletionJob = null
@@ -270,9 +362,9 @@ fun CollectionDetailScreen(
     }
 
 
-    // Tie status bar visibility directly to fabsVisible
-    // DisposableEffect re-runs whenever fabsVisible changes
-    DisposableEffect(fabsVisible, project.isBackground) {
+    // Tie status bar visibility directly to fabsVisible and isSelectionMode
+    // DisposableEffect re-runs whenever fabsVisible or isSelectionMode changes
+    DisposableEffect(fabsVisible, isSelectionMode, project.isBackground) {
         if (window != null) {
             val controller = WindowInsetsControllerCompat(window, view)
             controller.systemBarsBehavior =
@@ -282,7 +374,7 @@ fun CollectionDetailScreen(
                 controller.isAppearanceLightStatusBars = false
             }
 
-            if (fabsVisible) {
+            if (fabsVisible || isSelectionMode) {
                 // Controls visible — show status bar
                 controller.show(WindowInsetsCompat.Type.statusBars())
             } else {
@@ -302,10 +394,14 @@ fun CollectionDetailScreen(
     // ── Back handler — two stage ──────────────────────────────────────────
     BackHandler {
         snackbarJob?.cancel()
-        if (!fabsVisible) {
+        if (showMultiDeleteDialog) {
+            showMultiDeleteDialog = false
+        } else if (isSelectionMode) {
+            isSelectionMode = false
+            selectedTileIds.clear()
+        } else if (!fabsVisible) {
             fabsVisible = true  // first back press: show controls (status bar also restores)
         } else {
-            snackbarJob?.cancel()
             snackbarHostState.currentSnackbarData?.dismiss()
             onBackClick()       // second back press: navigate back
         }
@@ -313,7 +409,7 @@ fun CollectionDetailScreen(
 
     // ── FAB row slide animation ───────────────────────────────────────────
     val rowOffsetY by animateFloatAsState(
-        targetValue = if (fabsVisible) 0f else 300f,
+        targetValue = if (isSelectionMode || fabsVisible) 0f else 300f,
         animationSpec = spring(
             dampingRatio = Spring.DampingRatioMediumBouncy,
             stiffness = Spring.StiffnessLow
@@ -321,7 +417,7 @@ fun CollectionDetailScreen(
         label = "rowSlide"
     )
     val rowAlpha by animateFloatAsState(
-        targetValue = if (fabsVisible) 1f else 0f,
+        targetValue = if (isSelectionMode || fabsVisible) 1f else 0f,
         animationSpec = tween(280),
         label = "rowAlpha"
     )
@@ -392,21 +488,33 @@ fun CollectionDetailScreen(
                             tiles = visibleTiles ?: emptyList(),
                             shapeIndex = project.shapeIndex,
                             initialLoad = isFirstTimeEntry,
+                            isSelectionMode = isSelectionMode,
+                            selectedIds = selectedTileIds.keys,
                             onTileClick = { clickedTile ->
-                                if (!clickedTile.imageUri.isNullOrEmpty()) {
+                                if (isSelectionMode) {
+                                    if (selectedTileIds.containsKey(clickedTile.id)) {
+                                        selectedTileIds.remove(clickedTile.id)
+                                        if (selectedTileIds.isEmpty()) isSelectionMode = false
+                                    } else {
+                                        selectedTileIds[clickedTile.id] = true
+                                    }
+                                    triggerHaptic("TICK")
+                                } else if (!clickedTile.imageUri.isNullOrEmpty()) {
                                     val index = imageTiles.indexOfFirst { it.id == clickedTile.id }
                                     if (index != -1) selectedLightboxIndex = index
                                 }
                             },
                             onTileLongClick = { specificTile ->
-                                tileOptionsTarget = specificTile
+                                if (!isSelectionMode) {
+                                    tileOptionsTarget = specificTile
+                                }
                             },
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .padding(
                                     start = 12.dp, end = 12.dp,
-                                    top = if (fabsVisible) 80.dp else 24.dp,
-                                    bottom = if (fabsVisible) 75.dp else 10.dp,
+                                    top = if (isSelectionMode || fabsVisible) 80.dp else 24.dp,
+                                    bottom = if (isSelectionMode || fabsVisible) 75.dp else 10.dp,
                                 ),
                             gapDp = 8
                         )
@@ -450,12 +558,18 @@ fun CollectionDetailScreen(
                             selectedLightboxIndex = index
                         }
                         tileOptionsTarget = null
+                    },
+                    onSelect = {
+                        val target = tileOptionsTarget!!
+                        tileOptionsTarget = null
+                        isSelectionMode = true
+                        selectedTileIds[target.id] = true
                     }
                 )
             }
         }
         // ── Floating title — only when controls are visible ───────────────
-        if (fabsVisible) {
+        if (isSelectionMode || fabsVisible) {
             DetailTopBar(
                 projectName = projectName,
                 offsetY = rowOffsetY,
@@ -502,50 +616,106 @@ fun CollectionDetailScreen(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                SmallActionFab(
-                    icon = Icons.AutoMirrored.Filled.ArrowBack,
-                    contentDescription = "Back",
-                    onClick = {
-                        triggerHaptic("TICK")
-                        navigateAway { onBackClick() }
-                    }
-                )
-                BentoFab(
-                    onClick = {
-                        triggerHaptic("CONFIRM")
-                        navigateAway { onAddTileClick(project.id) }
-                    },
-                    visible = true,
-                    label = "Add Tile",
-                    compact = true
-                )
-                SmallActionFab(
-                    icon = Icons.Default.VisibilityOff,
-                    contentDescription = "Hide controls",
-                    onClick = {
-                        triggerHaptic("TICK")
-                        fabsVisible = false
-                        snackbarJob = scope.launch {
-                            snackbarHostState.showSnackbar(
-                                message = "Press back to show controls",
-                                duration = SnackbarDuration.Short
-                            )
+                if (isSelectionMode) {
+                    SelectionModeButton(
+                        icon = Icons.Default.Close,
+                        label = "",
+                        onClick = {
+                            triggerHaptic("TICK")
+                            selectedTileIds.clear()
+                            isSelectionMode = false
+                        },
+                        containerColor = MaterialTheme.colorScheme.surfaceVariant,
+                        contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(52.dp)
+                    )
+                    val isAllSelected = selectedTileIds.size == (visibleTiles?.size ?: 0) && (visibleTiles?.isNotEmpty() == true)
+                    SelectionModeButton(
+                        icon = if (isAllSelected) Icons.Default.RemoveCircleOutline else Icons.Default.DoneAll,
+                        label = if (isAllSelected) "Deselect All" else "Select All",
+                        onClick = {
+                            triggerHaptic("CONFIRM")
+                            val allIds = visibleTiles?.map { it.id } ?: emptyList()
+                            if (selectedTileIds.size == allIds.size && allIds.isNotEmpty()) {
+                                selectedTileIds.clear()
+                            } else {
+                                allIds.forEach { selectedTileIds[it] = true }
+                            }
+                        },
+                        containerColor = MaterialTheme.colorScheme.primaryContainer,
+                        contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+                        modifier = Modifier
+                            .weight(1f)
+                            .padding(horizontal = 8.dp)
+                    )
+                    val hasSelections = selectedTileIds.isNotEmpty()
+                    SelectionModeButton(
+                        icon = Icons.Default.Delete,
+                        label = if (hasSelections) "Delete (${selectedTileIds.size})" else "Delete",
+                        onClick = {
+                            triggerHaptic("TICK")
+                            if (hasSelections) {
+                                showMultiDeleteDialog = true
+                            }
+                        },
+                        containerColor = if (hasSelections) Color(0xFFDC2626) else MaterialTheme.colorScheme.surface,
+                        contentColor = if (hasSelections) Color.White else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.3f),
+                        modifier = Modifier
+                    )
+                } else {
+                    SmallActionFab(
+                        icon = Icons.AutoMirrored.Filled.ArrowBack,
+                        contentDescription = "Back",
+                        onClick = {
+                            triggerHaptic("TICK")
+                            navigateAway { onBackClick() }
                         }
-                    }
-                )
+                    )
+                    BentoFab(
+                        onClick = {
+                            triggerHaptic("CONFIRM")
+                            navigateAway { onAddTileClick(project.id) }
+                        },
+                        visible = true,
+                        label = "Add Tile",
+                        compact = true
+                    )
+                    SmallActionFab(
+                        icon = Icons.Default.VisibilityOff,
+                        contentDescription = "Hide controls",
+                        onClick = {
+                            triggerHaptic("TICK")
+                            fabsVisible = false
+                            snackbarJob = scope.launch {
+                                snackbarHostState.showSnackbar(
+                                    message = "Press back to show controls",
+                                    duration = SnackbarDuration.Short
+                                )
+                            }
+                        }
+                    )
+                }
             }
         }
 
         // Image Viewer
-        if (selectedLightboxIndex != null) {
+        if (selectedLightboxIndex != null && imageTiles.isNotEmpty()) {
+            val safeIndex = selectedLightboxIndex!!.coerceIn(0, imageTiles.lastIndex)
             BentoLightbox(
                 titles = imageTiles.map { it.title },
                 imagePaths = imagePaths,
-                initialIndex = selectedLightboxIndex!!,
+                initialIndex = safeIndex,
                 initialStatusBarVisible = fabsVisible,
                 onUiVisibilityChange = { isViewerUiActive = it },
                 onEdit = { index ->
                     val targetTile = imageTiles[index]
+                    reopenViewerForTileId = targetTile.id
+                    reopenViewerFallbackIndex = index
+                    editedFromViewer = true
+                    // Don't null selectedLightboxIndex — keep the lightbox visible
+                    // so the collection screen doesn't flash during the nav transition.
+                    // The lightbox composable will naturally disappear when the
+                    // navigation disposes this screen's composition.
                     navigateAway {
                         onEditTileClick(targetTile.projectId, targetTile.id)
                     }
@@ -590,6 +760,111 @@ fun CollectionDetailScreen(
                     },
                     actionColor = if (isDelete) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary
                 )
+            }
+        }
+        // ── Multi-Delete Confirmation Sheet ──
+        if (showMultiDeleteDialog) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(Color.Black.copy(alpha = 0.4f)),
+                contentAlignment = Alignment.BottomCenter
+            ) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .clickable { showMultiDeleteDialog = false }
+                )
+
+                Surface(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp)
+                        .padding(bottom = 32.dp),
+                    shape = RoundedCornerShape(32.dp),
+                    color = MaterialTheme.colorScheme.surface,
+                    tonalElevation = 8.dp
+                ) {
+                    Column(
+                        modifier = Modifier.padding(28.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Surface(
+                            shape = RoundedCornerShape(20.dp),
+                            color = MaterialTheme.colorScheme.error.copy(alpha = 0.1f),
+                            modifier = Modifier.size(64.dp)
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(
+                                    imageVector = Icons.Default.Delete,
+                                    contentDescription = null,
+                                    tint = Color(0xFFDC2626),
+                                    modifier = Modifier.size(28.dp)
+                                )
+                            }
+                        }
+
+                        Spacer(Modifier.height(20.dp))
+
+                        Text(
+                            text = "Delete ${selectedTileIds.size} tile${if (selectedTileIds.size > 1) "s" else ""}?",
+                            style = MaterialTheme.typography.titleLarge,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+
+                        Spacer(Modifier.height(12.dp))
+
+                        Text(
+                            text = if (selectedTileIds.size == 1) "1 tile will be removed permanently." else "${selectedTileIds.size} tiles will be removed permanently.",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f),
+                            textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                        )
+
+                        Spacer(Modifier.height(28.dp))
+
+                        Button(
+                            onClick = {
+                                triggerHaptic("CONFIRM")
+                                val tilesToDelete = visibleTiles?.filter { selectedTileIds.containsKey(it.id) } ?: emptyList()
+                                showMultiDeleteDialog = false
+                                handleMultiDeletion(tilesToDelete)
+                            },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(54.dp),
+                            shape = RoundedCornerShape(16.dp),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = Color(0xFFDC2626),
+                                contentColor = Color.White
+                            )
+                        ) {
+                            Text(
+                                "Delete permanently",
+                                fontWeight = FontWeight.SemiBold,
+                                style = MaterialTheme.typography.bodyLarge,
+                                color = Color.White
+                            )
+                        }
+
+                        Spacer(Modifier.height(10.dp))
+
+                        TextButton(
+                            onClick = { showMultiDeleteDialog = false },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(48.dp),
+                            shape = RoundedCornerShape(16.dp)
+                        ) {
+                            Text(
+                                "Cancel",
+                                style = MaterialTheme.typography.bodyLarge,
+                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
+                            )
+                        }
+                    }
+                }
             }
         }
     }
@@ -650,6 +925,46 @@ private fun SmallActionFab(
 }
 
 @Composable
+private fun SelectionModeButton(
+    icon: ImageVector,
+    label: String,
+    onClick: () -> Unit,
+    containerColor: Color = MaterialTheme.colorScheme.surface,
+    contentColor: Color = MaterialTheme.colorScheme.onSurface,
+    modifier: Modifier = Modifier
+) {
+    Surface(
+        onClick = onClick,
+        shape = RoundedCornerShape(18.dp),
+        color = containerColor,
+        shadowElevation = 6.dp,
+        modifier = modifier.height(52.dp)
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 16.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.Center
+        ) {
+            Icon(
+                imageVector = icon,
+                contentDescription = label,
+                tint = contentColor,
+                modifier = Modifier.size(22.dp)
+            )
+            if (label.isNotEmpty()) {
+                Spacer(Modifier.size(8.dp))
+                Text(
+                    text = label,
+                    style = MaterialTheme.typography.labelLarge,
+                    fontWeight = FontWeight.ExtraBold,
+                    color = contentColor
+                )
+            }
+        }
+    }
+}
+
+@Composable
 private fun CollectionEmptyView(
     projectName: String,
     modifier: Modifier = Modifier
@@ -689,7 +1004,8 @@ private fun TileActionContent(
     tile: BentoEntity,
     onEdit: () -> Unit,
     onDelete: () -> Unit,
-    onView: () -> Unit
+    onView: () -> Unit,
+    onSelect: () -> Unit
 ) {
     Column(
         modifier = Modifier
@@ -722,6 +1038,14 @@ private fun TileActionContent(
             label = "Edit Tile Settings",
             color = MaterialTheme.colorScheme.onSurface,
             onClick = onEdit
+        )
+
+        // SELECT ACTION
+        ActionRow(
+            icon = Icons.Default.CheckCircle,
+            label = "Select",
+            color = BentoSelectGreen,
+            onClick = onSelect
         )
 
         // DELETE ACTION

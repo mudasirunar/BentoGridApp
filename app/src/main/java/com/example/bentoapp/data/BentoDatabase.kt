@@ -9,7 +9,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
 
 @Database(
     entities = [BentoEntity::class, ProjectEntity::class],
-    version = 4,
+    version = 5,
     exportSchema = false
 )
 abstract class BentoDatabase : RoomDatabase() {
@@ -120,6 +120,12 @@ abstract class BentoDatabase : RoomDatabase() {
             }
         }
 
+        // ── MIGRATION: 4 → 5 ──
+        val MIGRATION_4_5 = object : Migration(4, 5) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE bento_tiles ADD COLUMN originalImageUrl TEXT")
+            }
+        }
 
         fun getDatabase(context: Context): BentoDatabase {
             return INSTANCE ?: synchronized(this) {
@@ -128,7 +134,7 @@ abstract class BentoDatabase : RoomDatabase() {
                     BentoDatabase::class.java,
                     "bento_database"
                 )
-                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
+                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
                     .build()
                 INSTANCE = instance
                 instance

@@ -88,6 +88,9 @@ val BentoOnErrorContainer = Color(0xFF991B1B)
 // Outline
 val BentoOutline       = Color(0xFFDDD6FE)   // violet-tinted border
 
+// Selection Action Color
+val BentoSelectGreen   = Color(0xFF10B981) // Premium emerald green for selection
+
 
 // ─────────────────────────────────────────────
 //  DARK MODE

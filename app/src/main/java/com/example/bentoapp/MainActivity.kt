@@ -19,7 +19,7 @@ import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import com.example.bentoapp.data.BentoDatabase
 import com.example.bentoapp.ui.screens.CollectionDetailScreen
-import com.example.bentoapp.ui.screens.MainDashboard
+import com.example.bentoapp.ui.screens.DashboardScreen
 import com.example.bentoapp.ui.theme.BentoAppTheme
 import com.example.bentoapp.viewmodel.BentoViewModel
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
@@ -47,6 +47,7 @@ class MainActivity : ComponentActivity() {
 
         setContent {
             val projects by viewModel.allProjects.collectAsState()
+        val projectCounts by viewModel.allProjectCounts.collectAsState()
 
             BentoAppTheme {
                 val navController = rememberNavController()
@@ -71,13 +72,23 @@ class MainActivity : ComponentActivity() {
 
                     // Level 1: Dashboard
                     composable("main_dashboard") {
-                        MainDashboard(
+                        DashboardScreen(
                             projects = projects,
+                            projectCounts = projectCounts,
                             onProjectClick = { project ->
                                 navController.navigate("collection_detail/${project.id}/${project.name}")
                             },
                             onProjectCreated = { name, imageUri, isBackground, shapeIndex ->
                                 viewModel.addProject(applicationContext, name, imageUri, isBackground, shapeIndex)
+                            },
+                            onProjectDeletedImmediate = { project, onFetched ->
+                                viewModel.deleteProjectDbOnly(project, onFetched)
+                            },
+                            onUndoProjectDelete = { project, tiles ->
+                                viewModel.restoreProject(project, tiles)
+                            },
+                            onProjectDeleteConfirm = { project, tiles ->
+                                viewModel.deleteProjectImagesOnly(project, tiles)
                             },
                             onProjectDeleted = { project ->
                                 viewModel.deleteProjectComplete(applicationContext, project)
@@ -114,8 +125,14 @@ class MainActivity : ComponentActivity() {
                             onEditTileClick = { projectId, tileId ->
                                 navController.navigate("add_tile/$projectId/${currentProject.shapeIndex}?tileId=$tileId")
                             },
+                            onDeleteTileImmediate = { tile ->
+                                viewModel.deleteTileDbOnly(tile)
+                            },
+                            onUndoDeleteTile = { tile ->
+                                viewModel.insertTileDirect(tile)
+                            },
                             onDeleteTileConfirm = { tile ->
-                                viewModel.deleteTile(applicationContext, tile)
+                                viewModel.deleteTileImageOnly(tile)
                             },
                             navController = navController,
                         )
