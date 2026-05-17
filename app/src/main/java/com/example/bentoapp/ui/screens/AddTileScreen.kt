@@ -46,6 +46,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.FormatAlignCenter
 import androidx.compose.material.icons.filled.FormatAlignLeft
 import androidx.compose.material.icons.filled.FormatAlignRight
@@ -145,6 +146,18 @@ fun AddTileScreen(
     var selectedImageUri by rememberSaveable { mutableStateOf<Uri?>(null) }
     var existingImagePath by rememberSaveable { mutableStateOf<String?>(null) }
 
+    var imageUrlInput by rememberSaveable { mutableStateOf("") }
+    var isFetchingUrl by rememberSaveable { mutableStateOf(false) }
+    var isSaving by rememberSaveable { mutableStateOf(false) }
+    var urlFetchError by remember { mutableStateOf<String?>(null) }
+
+    LaunchedEffect(urlFetchError) {
+        if (urlFetchError != null) {
+            kotlinx.coroutines.delay(3000)
+            urlFetchError = null
+        }
+    }
+
 
     // --- ORIGINAL STATE TRACKER (For Comparison) ---
     var originalTitle by rememberSaveable { mutableStateOf("") }
@@ -164,6 +177,7 @@ fun AddTileScreen(
     var originalIsContentUnderline by rememberSaveable { mutableStateOf(false) }
     var originalContentSizeOffset by rememberSaveable { mutableIntStateOf(0) }
     var originalImageUri by rememberSaveable { mutableStateOf<Uri?>(null) }
+    var originalImageUrlInput by rememberSaveable { mutableStateOf("") }
 
 
     var isInitialized by rememberSaveable { mutableStateOf(false) }
@@ -193,6 +207,7 @@ fun AddTileScreen(
                     isContentUnderline = tile.isContentUnderline
                     contentSizeOffset = tile.contentSizeOffset
                     existingImagePath = tile.imageUri
+                    imageUrlInput = tile.originalImageUrl ?: ""
                     val imageUri = if (!tile.imageUri.isNullOrEmpty()) Uri.fromFile(File(tile.imageUri)) else null
                     selectedImageUri = imageUri
 
@@ -214,6 +229,7 @@ fun AddTileScreen(
                     originalIsContentUnderline = tile.isContentUnderline
                     originalContentSizeOffset = tile.contentSizeOffset
                     originalImageUri = imageUri
+                    originalImageUrlInput = tile.originalImageUrl ?: ""
 
                     isCurrentSelectionGradient = BentoPalette.isGradient(tile.backgroundColor ?: 0)
 
@@ -303,17 +319,20 @@ fun AddTileScreen(
     }
 
     var showDiscardSheet by remember { mutableStateOf(false) }
-    BackHandler {
-        if (hasChanges) {
-            showDiscardSheet = true
-        } else {
-            onBack()
+    BackHandler(enabled = true) {
+        if (!isFetchingUrl && !isSaving) {
+            if (hasChanges) {
+                showDiscardSheet = true
+            } else {
+                onBack()
+            }
         }
     }
 
     // --- HAPTIC ENGINE ---
     val haptic = LocalHapticFeedback.current
     val context = LocalContext.current
+    val focusManager = androidx.compose.ui.platform.LocalFocusManager.current
     val vibrator = remember {
         context.getSystemService(android.content.Context.VIBRATOR_SERVICE) as android.os.Vibrator
     }
@@ -353,11 +372,13 @@ fun AddTileScreen(
         uri?.let { selectedImageUri = it }
     }
 
+    val finalImageUrlToSave = if (selectedImageUri == null || selectedImageUri?.toString()?.startsWith("content://") == true) "" else imageUrlInput
+
     val previewTile = remember(
         title, content, selectedImageUri, selectedShape, selectedColor,
         alignment, selectedTextColor, isBold, isItalic, isUnderline,
         textSizeOffset, isReversed, selectedContentTextColor,
-        isContentBold, isContentItalic, isContentUnderline, contentSizeOffset
+        isContentBold, isContentItalic, isContentUnderline, contentSizeOffset, imageUrlInput
     ) {
         BentoEntity(
             projectId = projectId,
@@ -377,7 +398,8 @@ fun AddTileScreen(
             isContentBold = isContentBold,
             isContentItalic = isContentItalic,
             isContentUnderline = isContentUnderline,
-            contentSizeOffset = contentSizeOffset
+            contentSizeOffset = contentSizeOffset,
+            originalImageUrl = finalImageUrlToSave
         )
     }
 
@@ -396,19 +418,26 @@ fun AddTileScreen(
                 horizontalArrangement = Arrangement.spacedBy(12.dp)
             ) {
                 Surface(
+                    onClick = {
+                        if (!isFetchingUrl && !isSaving) {
+                            triggerHaptic("TICK")
+                            if (hasChanges) showDiscardSheet = true else onBack()
+                        }
+                    },
+                    enabled = !isFetchingUrl && !isSaving,
                     shape = RoundedCornerShape(14.dp),
                     color = MaterialTheme.colorScheme.surface,
-                    shadowElevation = 4.dp,
-                    modifier = Modifier.size(44.dp).clickable {
-                        triggerHaptic("TICK")
-                        if (hasChanges) showDiscardSheet = true else onBack()
-                    }
+                    shadowElevation = if (isFetchingUrl || isSaving) 0.dp else 4.dp,
+                    modifier = Modifier.size(44.dp)
                 ) {
                     Box(contentAlignment = Alignment.Center) {
                         Icon(
                             imageVector = Icons.AutoMirrored.Filled.ArrowBack,
                             contentDescription = "Back",
-                            tint = MaterialTheme.colorScheme.onSurface,
+                            tint = if (isFetchingUrl || isSaving)
+                                MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
+                            else
+                                MaterialTheme.colorScheme.onSurface,
                             modifier = Modifier.size(20.dp)
                         )
                     }
@@ -446,8 +475,9 @@ fun AddTileScreen(
                                     )
                                 )
                         )
-                        .clickable(enabled = canSave) {
+                        .clickable(enabled = canSave && !isFetchingUrl && !isSaving) {
                             triggerHaptic("CONFIRM")
+                            isSaving = true
                             onSave(
                                 BentoEntity(
                                     id = tileId ?: 0,
@@ -468,9 +498,10 @@ fun AddTileScreen(
                                     isContentBold = isContentBold,
                                     isContentItalic = isContentItalic,
                                     isContentUnderline = isContentUnderline,
-                                    contentSizeOffset = contentSizeOffset
-                                ),
-                                selectedImageUri
+                                    contentSizeOffset = contentSizeOffset,
+                                    originalImageUrl = finalImageUrlToSave
+                                    ),
+                                    selectedImageUri
                             )
                         },
                     contentAlignment = Alignment.Center
@@ -518,8 +549,7 @@ fun AddTileScreen(
                 Column(modifier = Modifier.padding(horizontal = 20.dp)) {
                     // ── SHAPE SELECTOR ────────────────────────────────────────
                     SectionLabel(
-                        text = "Shape",
-                        modifier = Modifier.padding(horizontal = 20.dp)
+                        text = "Shape"
                     )
                     Spacer(Modifier.height(12.dp))
                     ShapeSelector(
@@ -533,7 +563,6 @@ fun AddTileScreen(
                     Spacer(Modifier.height(28.dp))
 
                     Column(
-                        modifier = Modifier.padding(horizontal = 20.dp),
                         verticalArrangement = Arrangement.spacedBy(16.dp)
                     ) {
                         // ── CONTENT ───────────────────────────────────────────
@@ -682,6 +711,111 @@ fun AddTileScreen(
                                     }
                                 }
                             }
+                        }
+
+                        // ── URL FETCH SECTION ─────────────────────────────────────────
+                        Spacer(Modifier.height(12.dp))
+
+                        Column(modifier = Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            SectionLabel("Web Image")
+                            Box(modifier = Modifier.fillMaxWidth()) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                OutlinedTextField(
+                                    value = imageUrlInput,
+                                    onValueChange = { imageUrlInput = it },
+                                    placeholder = { Text("Enter image URL...") },
+                                    enabled = !isFetchingUrl,
+                                    modifier = Modifier.weight(1f),
+                                    shape = RoundedCornerShape(14.dp),
+                                    singleLine = true,
+                                    trailingIcon = {
+                                        if (imageUrlInput.isNotEmpty()) {
+                                            androidx.compose.material3.IconButton(
+                                                onClick = {
+                                                    triggerHaptic("TICK")
+                                                    imageUrlInput = ""
+                                                },
+                                                enabled = !isFetchingUrl
+                                            ) {
+                                                Icon(
+                                                    imageVector = androidx.compose.material.icons.Icons.Default.Clear,
+                                                    contentDescription = "Clear URL"
+                                                )
+                                            }
+                                        }
+                                    },
+                                    keyboardOptions = KeyboardOptions(
+                                        imeAction = ImeAction.Done
+                                    ),
+                                    keyboardActions = androidx.compose.foundation.text.KeyboardActions(
+                                        onDone = {
+                                            focusManager.clearFocus()
+                                        }
+                                    )
+                                )
+
+                                Button(
+                                    onClick = {
+                                        if (imageUrlInput.isNotBlank()) {
+                                            triggerHaptic("TICK")
+                                            isFetchingUrl = true
+                                            urlFetchError = null
+                                            focusManager.clearFocus()
+
+                                            scope.launch {
+                                                val result = viewModel.downloadImageFromUrl(context, imageUrlInput)
+                                                if (result.isSuccess) {
+                                                    selectedImageUri = Uri.parse(result.getOrNull())
+                                                } else {
+                                                    urlFetchError = result.exceptionOrNull()?.message ?: "Failed to fetch image"
+                                                }
+                                                isFetchingUrl = false
+                                            }
+                                        }
+                                    },
+                                    enabled = !isFetchingUrl && imageUrlInput.isNotBlank(),
+                                    shape = RoundedCornerShape(14.dp),
+                                    modifier = Modifier.height(56.dp)
+                                ) {
+                                    if (isFetchingUrl) {
+                                        androidx.compose.material3.CircularProgressIndicator(
+                                            color = MaterialTheme.colorScheme.primary,
+                                            modifier = Modifier.size(24.dp),
+                                            strokeWidth = 2.dp
+                                        )
+                                    } else {
+                                        Text("Fetch")
+                                    }
+                                }
+                            }
+
+                            // Error Tooltip Overlay
+                            androidx.compose.animation.AnimatedVisibility(
+                                visible = urlFetchError != null,
+                                enter = androidx.compose.animation.fadeIn() + androidx.compose.animation.slideInVertically(initialOffsetY = { -it / 2 }),
+                                exit = androidx.compose.animation.fadeOut() + androidx.compose.animation.slideOutVertically(targetOffsetY = { -it / 2 }),
+                                modifier = Modifier
+                                    .align(Alignment.TopCenter)
+                                    .padding(top = 64.dp)
+                            ) {
+                                Surface(
+                                    shape = RoundedCornerShape(8.dp),
+                                    color = MaterialTheme.colorScheme.errorContainer,
+                                    shadowElevation = 4.dp
+                                ) {
+                                    Text(
+                                        text = urlFetchError ?: "",
+                                        color = MaterialTheme.colorScheme.onErrorContainer,
+                                        style = MaterialTheme.typography.labelMedium,
+                                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)
+                                    )
+                                }
+                            }
+                        }
                         }
 
                         // ── DYNAMIC COLOUR PICKER ─────────────────────────────────────
