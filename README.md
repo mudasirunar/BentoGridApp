@@ -49,6 +49,7 @@ The heart of Bento Grid is its advanced first-fit packing algorithm that dynamic
 ## 🖼 Image Handling System
 Bento Grid provides a seamless and safe approach to media management:
 * **Upload & Optimization**: Images picked from the device gallery are automatically downscaled and compressed (optimized to an 800px width) before being saved securely to the app's internal storage, preventing app bloat.
+* **URL Image Fetching**: Fetch images directly via web URLs. The application downloads the remote image asynchronously, applies compression/optimization, and saves it to secure local storage. To protect data and I/O integrity, the UI locks save actions, disables the top-bar back button, and intercepts system back gestures/keys during active downloading to avoid state or database corruption.
 * **Storage Safety**: When tiles or collections are updated or deleted, the associated physical image files are safely tracked and removed from storage to free up space without leaving orphan files.
 * **Interactive Viewer**: Tapping an image tile opens a full-screen, immersive Lightbox overlay. Built with Coil and ZoomImage, it supports high-performance pinch-to-zoom, double-tap gestures, and physical swipe-to-dismiss animations while smoothly handling edge-to-edge window insets.
 
