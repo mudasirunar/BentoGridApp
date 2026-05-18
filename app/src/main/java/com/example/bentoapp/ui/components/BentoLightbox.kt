@@ -23,6 +23,17 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Share
+import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.MoreVert
+import android.content.Context
+import android.content.Intent
+import android.graphics.Bitmap
+import android.graphics.drawable.BitmapDrawable
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.core.content.FileProvider
+import kotlinx.coroutines.Dispatchers
+import java.io.FileOutputStream
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -30,6 +41,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.input.pointer.*
 import androidx.compose.ui.input.pointer.util.VelocityTracker
 import androidx.compose.ui.layout.ContentScale
@@ -38,6 +50,7 @@ import androidx.compose.ui.platform.LocalViewConfiguration
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import com.github.panpf.zoomimage.CoilZoomAsyncImage
@@ -49,10 +62,6 @@ import kotlinx.coroutines.launch
 import java.io.File
 import kotlin.math.abs
 
-// ─────────────────────────────────────────────────────────────────────────────
-// BentoLightbox — unchanged
-// ─────────────────────────────────────────────────────────────────────────────
-
 @Composable
 fun BentoLightbox(
     titles: List<String>,
@@ -62,12 +71,14 @@ fun BentoLightbox(
     onUiVisibilityChange: (Boolean) -> Unit,
     onEdit: (Int) -> Unit,
     onDelete: (Int) -> Unit,
-    onDismiss: () -> Unit
+    onDismiss: () -> Unit,
+    isGalleryMode: Boolean = false
 ) {
     val configuration = androidx.compose.ui.platform.LocalConfiguration.current
     val isLandscape   = configuration.orientation ==
             android.content.res.Configuration.ORIENTATION_LANDSCAPE
 
+    val context = androidx.compose.ui.platform.LocalContext.current
 
     var controlsVisible by rememberSaveable { mutableStateOf(initialStatusBarVisible) }
 
@@ -75,23 +86,38 @@ fun BentoLightbox(
         onUiVisibilityChange(controlsVisible)
     }
 
-
-    // isZoomed only locks pager scroll. Does NOT affect UI visibility.
     var isZoomed by remember { mutableStateOf(false) }
 
     val view   = LocalView.current
-    val window = (view.context as? android.app.Activity)?.window
+    val window = remember(view) {
+        var foundWindow: android.view.Window? = null
 
-    var isVisible       by rememberSaveable { mutableStateOf(false) }
-    val pagerState      = rememberPagerState(initialPage = initialIndex) { imagePaths.size }
-    var globalDragAlpha by remember { mutableFloatStateOf(1f) }
-    val currentTitle    = titles.getOrNull(pagerState.currentPage) ?: ""
-
-    LaunchedEffect(initialIndex) {
-        if (pagerState.currentPage != initialIndex && initialIndex < imagePaths.size) {
-            pagerState.scrollToPage(initialIndex)
+        var currentParent = view.parent
+        while (currentParent != null) {
+            if (currentParent is androidx.compose.ui.window.DialogWindowProvider) {
+                foundWindow = currentParent.window
+                break
+            }
+            currentParent = currentParent.parent
         }
+
+        if (foundWindow == null) {
+            var context = view.context
+            while (context is android.content.ContextWrapper) {
+                if (context is android.app.Activity) {
+                    foundWindow = context.window
+                    break
+                }
+                context = context.baseContext
+            }
+        }
+        foundWindow
     }
+
+    var isVisible by rememberSaveable { mutableStateOf(false) }
+    val pagerState = rememberPagerState(initialPage = initialIndex) { imagePaths.size }
+    var globalDragAlpha by remember { mutableFloatStateOf(1f) }
+    val currentTitle = titles.getOrNull(pagerState.currentPage) ?: ""
 
     val scope = rememberCoroutineScope()
     val deleteTranslateX = remember { Animatable(0f) }
@@ -99,7 +125,6 @@ fun BentoLightbox(
 
     val handleDelete: () -> Unit = {
         val currentPage = pagerState.currentPage
-        // slide left if next image exists, slide right if this was last
         val direction = if (currentPage < imagePaths.size - 1) -1f else 1f
         scope.launch {
             coroutineScope {
@@ -107,7 +132,6 @@ fun BentoLightbox(
                 launch { deleteAlpha.animateTo(0f, tween(180)) }
             }
             onDelete(currentPage)
-            // reset instantly — next image is already in place
             deleteTranslateX.snapTo(0f)
             deleteAlpha.snapTo(1f)
         }
@@ -115,18 +139,34 @@ fun BentoLightbox(
 
     LaunchedEffect(Unit) { isVisible = true }
 
-    DisposableEffect(controlsVisible, isLandscape) {
+    val isDarkTheme = MaterialTheme.colorScheme.background.luminance() < 0.5f
+
+    DisposableEffect(controlsVisible, isLandscape, isDarkTheme) {
         window?.let { win ->
-            val controller = WindowInsetsControllerCompat(win, view)
+            win.statusBarColor = android.graphics.Color.TRANSPARENT
+            win.navigationBarColor = android.graphics.Color.TRANSPARENT
+            val controller = WindowCompat.getInsetsController(win, view)
             controller.systemBarsBehavior =
                 WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+            controller.isAppearanceLightStatusBars = !isDarkTheme
+            controller.isAppearanceLightNavigationBars = !isDarkTheme
+
             if (controlsVisible) {
                 controller.show(WindowInsetsCompat.Type.statusBars())
             } else {
                 controller.hide(WindowInsetsCompat.Type.statusBars())
             }
         }
-        onDispose { }
+        onDispose {
+            window?.let { win ->
+                val controller = WindowCompat.getInsetsController(win, view)
+                if (initialStatusBarVisible) {
+                    controller.show(WindowInsetsCompat.Type.statusBars())
+                } else {
+                    controller.hide(WindowInsetsCompat.Type.statusBars())
+                }
+            }
+        }
     }
 
     fun safeDismiss() {
@@ -145,7 +185,10 @@ fun BentoLightbox(
             modifier = Modifier
                 .fillMaxSize()
                 .pointerInput(Unit) {}
-                .background(Color.Black.copy(alpha = 0.90f * globalDragAlpha))
+                .background(
+                    if (isGalleryMode) MaterialTheme.colorScheme.background.copy(alpha = globalDragAlpha)
+                    else Color.Black.copy(alpha = 0.90f * globalDragAlpha)
+                )
         ) {
             HorizontalPager(
                 state = pagerState,
@@ -170,65 +213,76 @@ fun BentoLightbox(
                 )
             }
 
-            // Close button
-            AnimatedVisibility(
-                visible  = controlsVisible,
-                enter    = fadeIn() + slideInVertically { -it },
-                exit     = fadeOut() + slideOutVertically { -it },
-                modifier = Modifier.align(Alignment.TopEnd)
-            ) {
-                Box(modifier = Modifier.statusBarsPadding().padding(16.dp)) {
-                    LightboxTopControls(
-                        onEdit    = { onEdit(pagerState.currentPage) },
-                        onDelete  = { handleDelete() },
-                        onDismiss = { safeDismiss() }
-                    )
-                }
-            }
-
-            if (!isLandscape) {
+            if (!isGalleryMode) {
+                // Menu controls overlay animation
                 AnimatedVisibility(
-                    visible  = controlsVisible,
-                    enter    = fadeIn() + slideInVertically { it },
-                    exit     = fadeOut() + slideOutVertically { it },
-                    modifier = Modifier.align(Alignment.BottomCenter)
+                    visible = controlsVisible,
+                    enter = fadeIn() + slideInVertically { -it },
+                    exit = fadeOut() + slideOutVertically { -it },
+                    modifier = Modifier.align(Alignment.TopEnd)
                 ) {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .navigationBarsPadding()
-                            .padding(bottom = 32.dp, start = 24.dp, end = 24.dp)
-                            .graphicsLayer { alpha = globalDragAlpha },
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.spacedBy(12.dp)
-                    ) {
-                        val displayTitle = if (currentTitle.isNotBlank()) currentTitle else " "
-                        CounterChip(current = pagerState.currentPage + 1, total = imagePaths.size)
-                        TitleLabel(title = displayTitle, isLandscape = false)
+                    Box(modifier = Modifier.statusBarsPadding().padding(16.dp)) {
+                        LightboxTopControls(
+                            onEdit = { onEdit(pagerState.currentPage) },
+                            onShare = {
+                                val currentPath = imagePaths[pagerState.currentPage]
+                                shareImage(context, currentPath, scope)
+                            },
+                            onDelete = { handleDelete() }
+                        )
                     }
                 }
-            } else {
-                AnimatedVisibility(
-                    visible  = controlsVisible,
-                    enter    = fadeIn() + slideInHorizontally { it },
-                    exit     = fadeOut() + slideOutHorizontally { it },
-                    modifier = Modifier.align(Alignment.CenterEnd)
-                ) {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxHeight()
-                            .width(150.dp)
-                            .navigationBarsPadding()
-                            .padding(top = 24.dp, start = 16.dp, end = 16.dp, bottom = 8.dp)
-                            .graphicsLayer { this.alpha = globalDragAlpha },
-                        horizontalAlignment = Alignment.CenterHorizontally
+
+                if (!isLandscape) {
+                    AnimatedVisibility(
+                        visible = controlsVisible,
+                        enter = fadeIn() + slideInVertically { it },
+                        exit = fadeOut() + slideOutVertically { it },
+                        modifier = Modifier.align(Alignment.BottomCenter)
                     ) {
-                        Spacer(modifier = Modifier.weight(1f))
-                        if (currentTitle.isNotBlank()) {
-                            TitleLabel(title = currentTitle, isLandscape = true)
-                            Spacer(modifier = Modifier.height(12.dp))
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .navigationBarsPadding()
+                                .padding(bottom = 32.dp, start = 24.dp, end = 24.dp)
+                                .graphicsLayer { alpha = globalDragAlpha },
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            val displayTitle = if (currentTitle.isNotBlank()) currentTitle else " "
+                            CounterChip(
+                                current = pagerState.currentPage + 1,
+                                total = imagePaths.size
+                            )
+                            TitleLabel(title = displayTitle, isLandscape = false)
                         }
-                        CounterChip(current = pagerState.currentPage + 1, total = imagePaths.size)
+                    }
+                } else {
+                    AnimatedVisibility(
+                        visible = controlsVisible,
+                        enter = fadeIn() + slideInHorizontally { it },
+                        exit = fadeOut() + slideOutHorizontally { it },
+                        modifier = Modifier.align(Alignment.CenterEnd)
+                    ) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxHeight()
+                                .width(150.dp)
+                                .navigationBarsPadding()
+                                .padding(top = 24.dp, start = 16.dp, end = 16.dp, bottom = 8.dp)
+                                .graphicsLayer { this.alpha = globalDragAlpha },
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
+                            Spacer(modifier = Modifier.weight(1f))
+                            if (currentTitle.isNotBlank()) {
+                                TitleLabel(title = currentTitle, isLandscape = true)
+                                Spacer(modifier = Modifier.height(12.dp))
+                            }
+                            CounterChip(
+                                current = pagerState.currentPage + 1,
+                                total = imagePaths.size
+                            )
+                        }
                     }
                 }
             }
@@ -240,30 +294,133 @@ fun BentoLightbox(
 // UI components
 // ─────────────────────────────────────────────────────────────────────────────
 
-@Composable
-private fun LightboxTopControls(onEdit: () -> Unit, onDelete: () -> Unit, onDismiss: () -> Unit) {
-    Surface(
-        color = Color.White.copy(alpha = 0.12f),
-        shape = CircleShape,
-        border = androidx.compose.foundation.BorderStroke(1.dp, Color.White.copy(alpha = 0.1f)),
-        modifier = Modifier.height(44.dp)
-    ) {
-        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(horizontal = 4.dp)) {
-            // Segment 1: Edit
-            Surface(onClick = onEdit, color = Color.White.copy(alpha = 0.15f), shape = CircleShape, modifier = Modifier.fillMaxHeight(0.85f)) {
-                Box(contentAlignment = Alignment.Center, modifier = Modifier.padding(horizontal = 14.dp)) {
-                    Text("Edit", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold, color = Color.White)
+private fun shareImage(context: Context, imagePath: String, coroutineScope: kotlinx.coroutines.CoroutineScope) {
+    coroutineScope.launch(Dispatchers.IO) {
+        try {
+            val file = java.io.File(imagePath)
+            val sharedFile = if (file.exists() && file.length() > 0) {
+                file
+            } else if (imagePath.startsWith("http://") || imagePath.startsWith("https://")) {
+                val loader = coil.ImageLoader(context)
+                val request = coil.request.ImageRequest.Builder(context)
+                    .data(imagePath)
+                    .allowHardware(false)
+                    .build()
+                val result = loader.execute(request)
+                if (result is coil.request.SuccessResult) {
+                    val drawable = result.drawable
+                    if (drawable is android.graphics.drawable.BitmapDrawable) {
+                        val bitmap = drawable.bitmap
+                        val cacheFile = java.io.File(context.cacheDir, "shared_image_${System.currentTimeMillis()}.png")
+                        java.io.FileOutputStream(cacheFile).use { out ->
+                            bitmap.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, out)
+                        }
+                        cacheFile
+                    } else {
+                        null
+                    }
+                } else {
+                    null
                 }
+            } else {
+                null
             }
-            Spacer(Modifier.width(4.dp))
-            // Segment 2: Delete (Icon)
-            Surface(onClick = onDelete, color = Color.White.copy(alpha = 0.15f), shape = CircleShape, modifier = Modifier.size(36.dp)) {
-                Icon(Icons.Default.Delete, "Delete", tint = Color.White, modifier = Modifier.padding(9.dp))
+
+            if (imagePath.startsWith("content://")) {
+                val uri = android.net.Uri.parse(imagePath)
+                val intent = Intent(Intent.ACTION_SEND).apply {
+                    type = "image/*"
+                    putExtra(Intent.EXTRA_STREAM, uri)
+                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                }
+                val chooser = Intent.createChooser(intent, "Share Image")
+                chooser.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                context.startActivity(chooser)
+            } else if (sharedFile != null && sharedFile.exists()) {
+                val uri = FileProvider.getUriForFile(
+                    context,
+                    "${context.packageName}.fileprovider",
+                    sharedFile
+                )
+                val intent = Intent(Intent.ACTION_SEND).apply {
+                    type = "image/*"
+                    putExtra(Intent.EXTRA_STREAM, uri)
+                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                }
+                val chooser = Intent.createChooser(intent, "Share Image")
+                chooser.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                context.startActivity(chooser)
             }
-            Spacer(Modifier.width(4.dp))
-            // Segment 3: Close
-            Surface(onClick = onDismiss, color = Color.White.copy(alpha = 0.15f), shape = CircleShape, modifier = Modifier.size(36.dp)) {
-                Icon(Icons.Default.Close, "Close", tint = Color.White, modifier = Modifier.padding(8.dp))
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+    }
+}
+
+@Composable
+private fun LightboxTopControls(
+    onEdit: () -> Unit,
+    onShare: () -> Unit,
+    onDelete: () -> Unit
+) {
+    var menuExpanded by remember { mutableStateOf(false) }
+
+    Box {
+        Surface(
+            onClick = { menuExpanded = true },
+            color = Color.White.copy(alpha = 0.12f),
+            shape = CircleShape,
+            border = androidx.compose.foundation.BorderStroke(1.dp, Color.White.copy(alpha = 0.1f)),
+            modifier = Modifier.size(44.dp)
+        ) {
+            Box(contentAlignment = Alignment.Center) {
+                Icon(
+                    imageVector = Icons.Default.MoreVert,
+                    contentDescription = "Options",
+                    tint = Color.White,
+                    modifier = Modifier.size(24.dp)
+                )
+            }
+        }
+
+        // 🔥 THE FIX: By explicitly forcing a darkColorScheme, the Popup Window
+        // will NEVER turn white in Light Mode. It stays perfectly dark and glassy!
+        MaterialTheme(
+            colorScheme = androidx.compose.material3.darkColorScheme(
+                surface = Color.Black.copy(alpha = 0.85f),
+                onSurface = Color.White
+            )
+        ) {
+            DropdownMenu(
+                expanded = menuExpanded,
+                onDismissRequest = { menuExpanded = false },
+                shape = RoundedCornerShape(20.dp),
+                modifier = Modifier.widthIn(min = 160.dp)
+            ) {
+                DropdownMenuItem(
+                    text = { Text("Edit", fontWeight = FontWeight.Bold, color = Color.White) },
+                    leadingIcon = { Icon(Icons.Default.Edit, contentDescription = null, tint = Color(0xFF00B2FF)) },
+                    onClick = {
+                        menuExpanded = false
+                        onEdit()
+                    }
+                )
+                DropdownMenuItem(
+                    text = { Text("Share", fontWeight = FontWeight.Bold, color = Color.White) },
+                    leadingIcon = { Icon(Icons.Default.Share, contentDescription = null, tint = Color(0xFF10B981)) },
+                    onClick = {
+                        menuExpanded = false
+                        onShare()
+                    }
+                )
+                DropdownMenuItem(
+                    text = { Text("Delete", fontWeight = FontWeight.Bold, color = Color(0xFFDC2626)) },
+                    leadingIcon = { Icon(Icons.Default.Delete, contentDescription = null, tint = Color(0xFFDC2626)) },
+                    onClick = {
+                        menuExpanded = false
+                        onDelete()
+                    }
+                )
             }
         }
     }
@@ -300,28 +457,6 @@ private fun TitleLabel(title: String, isLandscape: Boolean, modifier: Modifier =
     }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// ZoomableImage
-//
-//  Tap / double-tap logic
-//  ───────────────────────
-//  Problem 1 — Single tap didn't work while zoomed in:
-//    Old code had `if (userTransform.scaleX > 1.01f) return@awaitEachGesture`
-//    which exited the ENTIRE gesture handler, so tap detection never ran.
-//    Fix: remove the blanket early return. Instead only gate the DISMISS
-//    logic behind the zoom check. Tap detection always runs.
-//
-//  Problem 2 — Double-tap was toggling the UI:
-//    On tap-1 up  → singleTapJob timer started (300 ms).
-//    On tap-2 down → singleTapJob correctly cancelled.
-//    On tap-2 up  → hasMoved=false, so a NEW singleTapJob was started for
-//                   tap-2, which then fired onImageTap after 300 ms.
-//    Fix: at finger-down, snapshot `wasDoubleTap = singleTapJob?.isActive == true`
-//    BEFORE cancelling. If true this gesture is the second tap of a double-tap
-//    → skip starting singleTapJob on its finger-up.
-//
-// ─────────────────────────────────────────────────────────────────────────────
-
 private const val DOUBLE_TAP_WINDOW_MS = 300L
 private const val TAP_SLOP_PX         = 30f
 
@@ -338,7 +473,6 @@ private fun ZoomableImage(
 
     val zoomState = rememberCoilZoomState()
 
-    // userTransform only — ContentScale base scale excluded (fixes portrait/landscape breakage)
     val isUserZoomed = zoomState.zoomable.userTransform.scaleX > 1.01f
     LaunchedEffect(isUserZoomed) { onZoomChanged(isUserZoomed) }
 
@@ -346,7 +480,6 @@ private fun ZoomableImage(
     var physicsJob : Job? = remember { null }
     var singleTapJob: Job? = remember { null }
 
-    // ── Vibrator ──────────────────────────────────────────────────────────────
     val context  = androidx.compose.ui.platform.LocalContext.current
     val vibrator = remember {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
@@ -399,17 +532,11 @@ private fun ZoomableImage(
 
                 coroutineScope {
                     awaitEachGesture {
-
-                        // ── FINGER DOWN ───────────────────────────────────
                         val downEvent  = awaitPointerEvent(PointerEventPass.Initial)
                         val downChange = downEvent.changes.firstOrNull { it.pressed }
                             ?: return@awaitEachGesture
                         val startPos   = downChange.position
 
-                        // FIX 2: snapshot BEFORE cancelling.
-                        // If a timer was actively counting down it means this
-                        // finger-down is tap-2 of a double-tap. We must NOT
-                        // start a new singleTapJob on this gesture's finger-up.
                         val isSecondTapOfDoubleTap = singleTapJob?.isActive == true
                         singleTapJob?.cancel()
                         singleTapJob = null
@@ -427,16 +554,12 @@ private fun ZoomableImage(
                         var hasMoved          = false
                         var localDismissY     = 0f
 
-                        // ── EVENT LOOP ────────────────────────────────────
                         while (true) {
                             val event  = awaitPointerEvent(PointerEventPass.Initial)
                             val change = event.changes.firstOrNull { it.id == downChange.id }
 
-                            // ── FINGER UP ─────────────────────────────────
                             if (change == null || !change.pressed) {
-
                                 when {
-                                    // Dismiss committed or cancelled — run physics
                                     isDismiss -> {
                                         val velocity = velocityTracker.calculateVelocity()
                                         physicsJob = scope.launch {
@@ -454,13 +577,6 @@ private fun ZoomableImage(
                                             }
                                         }
                                     }
-
-                                    // Finger lifted without movement AND this is
-                                    // NOT the second tap of a double-tap → tap.
-                                    // FIX 1: no early return for zoom — tap detection
-                                    // always runs regardless of zoom state.
-                                    // FIX 2: skip if isSecondTapOfDoubleTap so tap-2
-                                    // of a double-tap never triggers the UI toggle.
                                     !hasMoved && !isSecondTapOfDoubleTap -> {
                                         singleTapJob = scope.launch {
                                             delay(DOUBLE_TAP_WINDOW_MS)
@@ -474,13 +590,11 @@ private fun ZoomableImage(
                             val totalDelta = change.position - startPos
                             if (totalDelta.getDistance() > TAP_SLOP_PX) hasMoved = true
 
-                            // Only run dismiss detection when NOT zoomed in.
-                            // When zoomed, ZoomImage owns the pan gesture — don't intercept.
                             if (!currentlyZoomed) {
                                 if (!directionResolved && totalDelta.getDistance() > touchSlop) {
                                     directionResolved = true
                                     isDismiss = abs(totalDelta.y) > abs(totalDelta.x) && totalDelta.y > 0f
-                                    if (!isDismiss) break // horizontal/upward → pager or ZoomImage
+                                    if (!isDismiss) break
                                 }
 
                                 if (isDismiss) {
@@ -503,8 +617,6 @@ private fun ZoomableImage(
             modifier           = Modifier.fillMaxSize(),
             zoomState          = zoomState,
             scrollBar          = null
-            // onTap intentionally omitted — we handle it above with double-tap
-            // disambiguation so the UI never flickers on zoom gestures
         )
     }
 }

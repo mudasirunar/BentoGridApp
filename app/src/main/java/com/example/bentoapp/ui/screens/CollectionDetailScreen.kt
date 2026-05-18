@@ -20,11 +20,17 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.ui.draw.clip
+import android.content.res.Configuration
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -54,6 +60,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.TextButton
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -73,12 +80,14 @@ import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import androidx.navigation.NavController
@@ -167,7 +176,16 @@ fun CollectionDetailScreen(
 
     // ── Status bar controller ─────────────────────────────────────────────
     val view = LocalView.current
-    val window = (view.context as? android.app.Activity)?.window
+    val window = remember(view) {
+        var context = view.context
+        while (context is android.content.ContextWrapper) {
+            if (context is android.app.Activity) {
+                return@remember context.window
+            }
+            context = context.baseContext
+        }
+        null
+    }
 
     // --- SMART ACTION OBSERVER  ---
     val navBackStackEntry = navController.currentBackStackEntry
@@ -214,7 +232,7 @@ fun CollectionDetailScreen(
     var activeDeletionJob by remember { mutableStateOf<Job?>(null) }
 
     var isSelectionMode by rememberSaveable { mutableStateOf(false) }
-    val selectedTileIds = remember { mutableStateMapOf<Int, Boolean>() }
+    var selectedTileIds by rememberSaveable { mutableStateOf(emptySet<Int>()) }
     var showMultiDeleteDialog by remember { mutableStateOf(false) }
 
 
@@ -330,7 +348,7 @@ fun CollectionDetailScreen(
         tilesToDelete.forEach { pendingDeletions[it.id] = it }
         
         isSelectionMode = false
-        selectedTileIds.clear()
+        selectedTileIds = emptySet()
 
         activeDeletionJob = scope.launch {
             val result = snackbarHostState.showSnackbar(
@@ -364,15 +382,13 @@ fun CollectionDetailScreen(
 
     // Tie status bar visibility directly to fabsVisible and isSelectionMode
     // DisposableEffect re-runs whenever fabsVisible or isSelectionMode changes
-    DisposableEffect(fabsVisible, isSelectionMode, project.isBackground) {
+    val isDarkTheme = MaterialTheme.colorScheme.background.luminance() < 0.5f
+
+    DisposableEffect(fabsVisible, isSelectionMode, project.isBackground, isDarkTheme) {
         if (window != null) {
-            val controller = WindowInsetsControllerCompat(window, view)
+            val controller = WindowCompat.getInsetsController(window, view)
             controller.systemBarsBehavior =
                 WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
-
-            if (project.isBackground) {
-                controller.isAppearanceLightStatusBars = false
-            }
 
             if (fabsVisible || isSelectionMode) {
                 // Controls visible — show status bar
@@ -381,12 +397,21 @@ fun CollectionDetailScreen(
                 // Controls hidden — hide status bar, full immersive
                 controller.hide(WindowInsetsCompat.Type.statusBars())
             }
+
+            if (project.isBackground) {
+                // If project has a background image, we usually want light icons (dark scrim)
+                controller.isAppearanceLightStatusBars = false
+            } else {
+                // Otherwise, follow the app's theme
+                controller.isAppearanceLightStatusBars = !isDarkTheme
+            }
         }
         onDispose {
             // Always restore status bar when leaving this screen
             if (window != null) {
-                WindowInsetsControllerCompat(window, view)
-                    .show(WindowInsetsCompat.Type.statusBars())
+                val controller = WindowCompat.getInsetsController(window, view)
+                controller.show(WindowInsetsCompat.Type.statusBars())
+                controller.isAppearanceLightStatusBars = !isDarkTheme
             }
         }
     }
@@ -398,7 +423,7 @@ fun CollectionDetailScreen(
             showMultiDeleteDialog = false
         } else if (isSelectionMode) {
             isSelectionMode = false
-            selectedTileIds.clear()
+            selectedTileIds = emptySet()
         } else if (!fabsVisible) {
             fabsVisible = true  // first back press: show controls (status bar also restores)
         } else {
@@ -489,14 +514,14 @@ fun CollectionDetailScreen(
                             shapeIndex = project.shapeIndex,
                             initialLoad = isFirstTimeEntry,
                             isSelectionMode = isSelectionMode,
-                            selectedIds = selectedTileIds.keys,
+                            selectedIds = selectedTileIds,
                             onTileClick = { clickedTile ->
                                 if (isSelectionMode) {
-                                    if (selectedTileIds.containsKey(clickedTile.id)) {
-                                        selectedTileIds.remove(clickedTile.id)
+                                    if (clickedTile.id in selectedTileIds) {
+                                        selectedTileIds = selectedTileIds - clickedTile.id
                                         if (selectedTileIds.isEmpty()) isSelectionMode = false
                                     } else {
-                                        selectedTileIds[clickedTile.id] = true
+                                        selectedTileIds = selectedTileIds + clickedTile.id
                                     }
                                     triggerHaptic("TICK")
                                 } else if (!clickedTile.imageUri.isNullOrEmpty()) {
@@ -534,6 +559,7 @@ fun CollectionDetailScreen(
             ModalBottomSheet(
                 onDismissRequest = { tileOptionsTarget = null },
                 sheetState = sheetState,
+                modifier = Modifier.widthIn(max = 480.dp),
                 containerColor = MaterialTheme.colorScheme.surface,
                 tonalElevation = 8.dp,
                 dragHandle = { BottomSheetDefaults.DragHandle(color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.1f)) },
@@ -563,11 +589,12 @@ fun CollectionDetailScreen(
                         val target = tileOptionsTarget!!
                         tileOptionsTarget = null
                         isSelectionMode = true
-                        selectedTileIds[target.id] = true
+                        selectedTileIds = selectedTileIds + target.id
                     }
                 )
             }
         }
+
         // ── Floating title — only when controls are visible ───────────────
         if (isSelectionMode || fabsVisible) {
             DetailTopBar(
@@ -609,20 +636,23 @@ fun CollectionDetailScreen(
                 }
                 .navigationBarsPadding()
                 .padding(bottom = 14.dp)
-                .padding(horizontal = 24.dp)
+                .padding(horizontal = 24.dp),
+            contentAlignment = Alignment.Center
         ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                if (isSelectionMode) {
+            if (isSelectionMode) {
+                Row(
+                    modifier = Modifier
+                        .widthIn(max = 480.dp)
+                        .fillMaxWidth(),
+                    horizontalArrangement = Arrangement.Center,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
                     SelectionModeButton(
                         icon = Icons.Default.Close,
                         label = "",
                         onClick = {
                             triggerHaptic("TICK")
-                            selectedTileIds.clear()
+                            selectedTileIds = emptySet()
                             isSelectionMode = false
                         },
                         containerColor = MaterialTheme.colorScheme.surfaceVariant,
@@ -637,9 +667,9 @@ fun CollectionDetailScreen(
                             triggerHaptic("CONFIRM")
                             val allIds = visibleTiles?.map { it.id } ?: emptyList()
                             if (selectedTileIds.size == allIds.size && allIds.isNotEmpty()) {
-                                selectedTileIds.clear()
+                                selectedTileIds = emptySet()
                             } else {
-                                allIds.forEach { selectedTileIds[it] = true }
+                                selectedTileIds = allIds.toSet()
                             }
                         },
                         containerColor = MaterialTheme.colorScheme.primaryContainer,
@@ -662,7 +692,13 @@ fun CollectionDetailScreen(
                         contentColor = if (hasSelections) Color.White else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.3f),
                         modifier = Modifier
                     )
-                } else {
+                }
+            } else {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
                     SmallActionFab(
                         icon = Icons.AutoMirrored.Filled.ArrowBack,
                         contentDescription = "Back",
@@ -778,9 +814,11 @@ fun CollectionDetailScreen(
 
                 Surface(
                     modifier = Modifier
+                        .widthIn(max = 480.dp)
                         .fillMaxWidth()
+                        .navigationBarsPadding()
                         .padding(horizontal = 16.dp)
-                        .padding(bottom = 32.dp),
+                        .padding(bottom = 12.dp),
                     shape = RoundedCornerShape(32.dp),
                     color = MaterialTheme.colorScheme.surface,
                     tonalElevation = 8.dp
@@ -827,7 +865,7 @@ fun CollectionDetailScreen(
                         Button(
                             onClick = {
                                 triggerHaptic("CONFIRM")
-                                val tilesToDelete = visibleTiles?.filter { selectedTileIds.containsKey(it.id) } ?: emptyList()
+                                val tilesToDelete = visibleTiles?.filter { it.id in selectedTileIds } ?: emptyList()
                                 showMultiDeleteDialog = false
                                 handleMultiDeletion(tilesToDelete)
                             },
@@ -1005,11 +1043,17 @@ private fun TileActionContent(
     onEdit: () -> Unit,
     onDelete: () -> Unit,
     onView: () -> Unit,
-    onSelect: () -> Unit
+    onSelect: () -> Unit,
+    modifier: Modifier = Modifier
 ) {
+    val configuration = LocalConfiguration.current
+    val screenHeight = configuration.screenHeightDp.dp
+
     Column(
-        modifier = Modifier
+        modifier = modifier
             .fillMaxWidth()
+            .heightIn(max = screenHeight - 64.dp)
+            .verticalScroll(rememberScrollState())
             .navigationBarsPadding()
             .padding(horizontal = 24.dp)
             .padding(top = 8.dp, bottom = 32.dp),
