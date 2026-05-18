@@ -1,7 +1,5 @@
 package com.example.bentoapp.ui.components
 
-import android.R.attr.label
-import android.R.attr.onClick
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
@@ -11,9 +9,12 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Check
@@ -56,6 +57,8 @@ fun AddProjectDialog(
     var setAsBackground by rememberSaveable { mutableStateOf(existingIsBackground) }
     var selectedShapeIndex by rememberSaveable { mutableStateOf(existingShapeIndex) }
     val isNameValid = projectName.isNotBlank()
+    val screenHeight = LocalConfiguration.current.screenHeightDp.dp
+    val scrollState = rememberScrollState()
 
 
 
@@ -107,6 +110,7 @@ fun AddProjectDialog(
     ) {
         Box(
             modifier = Modifier
+                .widthIn(max = 480.dp)
                 .fillMaxWidth()
                 .background(Color.Transparent)
                 .padding(horizontal = 20.dp)
@@ -120,6 +124,7 @@ fun AddProjectDialog(
             Surface(
                 modifier = Modifier
                     .fillMaxWidth()
+                    .heightIn(max = screenHeight - 40.dp)
                     .clip(RoundedCornerShape(36.dp))
                     .border(
                         width = 0.5.dp,
@@ -137,7 +142,9 @@ fun AddProjectDialog(
                 shadowElevation = 0.dp
             ) {
                 Column(
-                    modifier = Modifier.padding(28.dp),
+                    modifier = Modifier
+                        .verticalScroll(scrollState)
+                        .padding(28.dp),
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
 

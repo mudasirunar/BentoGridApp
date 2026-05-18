@@ -92,6 +92,7 @@ class MainActivity : ComponentActivity() {
                     // Level 1: Dashboard
                     composable("main_dashboard") {
                         DashboardScreen(
+                            viewModel = viewModel,
                             projects = projects,
                             projectCounts = projectCounts,
                             preferenceManager = preferenceManager,
