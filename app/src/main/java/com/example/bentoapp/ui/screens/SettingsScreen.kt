@@ -22,6 +22,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -50,6 +51,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.bentoapp.utils.ThemeMode
+import com.example.bentoapp.ui.components.SimpleTopBar
 import kotlinx.coroutines.launch
 
 @Composable
@@ -57,21 +59,25 @@ fun SettingsScreen(
     currentThemeMode: ThemeMode,
     onThemeSelected: (ThemeMode) -> Unit,
     bottomPadding: androidx.compose.ui.unit.Dp = 0.dp,
+    scrollState: ScrollState = rememberScrollState(),
     modifier: Modifier = Modifier
 ) {
-    Box(
+    Column(
         modifier = modifier
             .fillMaxSize()
-            .background(MaterialTheme.colorScheme.background),
-        contentAlignment = Alignment.TopCenter
+            .background(MaterialTheme.colorScheme.background)
     ) {
+        SimpleTopBar(title = "Settings")
+
         Column(
             horizontalAlignment = Alignment.Start, // Align to left
             modifier = Modifier
                 .padding(horizontal = 24.dp)
-                .padding(top = 110.dp) // Below TopBar
-                .verticalScroll(rememberScrollState())
+                .verticalScroll(scrollState)
+                .weight(1f)
         ) {
+            Spacer(Modifier.height(12.dp))
+            
             // ── Theme Section ──
             ThemeSettingsSection(
                 currentThemeMode = currentThemeMode,
@@ -117,7 +123,7 @@ private fun ThemeSettingsSection(
                 letterSpacing = (-0.5).sp
             )
             Text(
-                text = "Refine the app's visual atmosphere",
+                text = "Choose your preferred appearance.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.45f)
             )

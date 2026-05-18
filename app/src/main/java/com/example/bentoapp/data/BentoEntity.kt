@@ -12,7 +12,8 @@ data class ProjectEntity(
     val name: String,
     val imageUrl: String = "",
     val isBackground: Boolean = false,
-    val shapeIndex: Int = 1
+    val shapeIndex: Int = 1,
+    val createdAt: Long = System.currentTimeMillis()
 )
 
 @Entity(tableName = "bento_tiles")
@@ -38,7 +39,8 @@ data class BentoEntity(
     val isContentItalic: Boolean = false,
     val isContentUnderline: Boolean = false,
     val contentSizeOffset: Int = 0,
-    val originalImageUrl: String? = null
+    val originalImageUrl: String? = null,
+    val createdAt: Long = System.currentTimeMillis()
 ) {
     val shape: TileShape get() = TileShape.fromIndex(shapeIndex)
 }

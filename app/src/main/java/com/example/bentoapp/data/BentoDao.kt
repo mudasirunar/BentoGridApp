@@ -41,6 +41,8 @@ interface BentoDao {
     @Query("SELECT * FROM bento_tiles WHERE projectId = :projectId")
     suspend fun getTilesSync(projectId: Int): List<BentoEntity> // Non-flow for one-time cleanup
 
+    @Query("SELECT * FROM bento_tiles WHERE imageUri IS NOT NULL AND imageUri != '' ORDER BY id DESC")
+    fun getAllGalleryImages(): Flow<List<BentoEntity>>
     @Delete
     suspend fun deleteProject(project: ProjectEntity)
 

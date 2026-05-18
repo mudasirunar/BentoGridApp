@@ -42,6 +42,13 @@ class BentoViewModel(private val dao: BentoDao) : ViewModel() {
             initialValue = emptyMap()
         )
 
+    val allGalleryImages: StateFlow<List<BentoEntity>> = dao.getAllGalleryImages()
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5000),
+            initialValue = emptyList()
+        )
+
     fun getTilesForProject(projectId: Int): StateFlow<List<BentoEntity>?> =
         dao.getTilesForProject(projectId)
             .stateIn(
