@@ -88,4 +88,7 @@ dependencies {
     //Zoom Functionality
     implementation("io.github.panpf.zoomimage:zoomimage-compose-coil2:1.4.0")
 
+    // DataStore
+    implementation(libs.androidx.datastore.preferences)
+
 }

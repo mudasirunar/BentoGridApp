@@ -25,6 +25,13 @@ import com.example.bentoapp.viewmodel.BentoViewModel
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import com.example.bentoapp.data.ProjectEntity
 import com.example.bentoapp.ui.screens.AddTileScreen
+import com.example.bentoapp.utils.PreferenceManager
+import com.example.bentoapp.utils.ThemeMode
+
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import androidx.lifecycle.lifecycleScope
+import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -34,6 +41,15 @@ class MainActivity : ComponentActivity() {
 
         val db = BentoDatabase.getDatabase(applicationContext)
         val viewModel = BentoViewModel(db.bentoDao())
+        val preferenceManager = PreferenceManager(applicationContext)
+
+        // Theme Loading State
+        var themeModeState by mutableStateOf<ThemeMode?>(null)
+        lifecycleScope.launch {
+            preferenceManager.themeMode.collect { mode ->
+                themeModeState = mode
+            }
+        }
 
         val splashShownAt = System.currentTimeMillis()
         val minSplashDuration = 1050L // ring finishes at 1000ms + 50ms buffer
@@ -42,14 +58,17 @@ class MainActivity : ComponentActivity() {
             val elapsed = System.currentTimeMillis() - splashShownAt
             val animationDone = elapsed >= minSplashDuration
             val loadingDone = !viewModel.isLoading.value
-            !(animationDone && loadingDone)
+            val themeDone = themeModeState != null
+            !(animationDone && loadingDone && themeDone)
         }
 
         setContent {
+            val themeMode = themeModeState ?: return@setContent // Skip first frames until theme is ready
+            
             val projects by viewModel.allProjects.collectAsState()
-        val projectCounts by viewModel.allProjectCounts.collectAsState()
+            val projectCounts by viewModel.allProjectCounts.collectAsState()
 
-            BentoAppTheme {
+            BentoAppTheme(themeMode = themeMode) {
                 val navController = rememberNavController()
 
                 NavHost(
@@ -75,6 +94,8 @@ class MainActivity : ComponentActivity() {
                         DashboardScreen(
                             projects = projects,
                             projectCounts = projectCounts,
+                            preferenceManager = preferenceManager,
+                            currentThemeMode = themeMode,
                             onProjectClick = { project ->
                                 navController.navigate("collection_detail/${project.id}/${project.name}")
                             },
@@ -89,9 +110,6 @@ class MainActivity : ComponentActivity() {
                             },
                             onProjectDeleteConfirm = { project, tiles ->
                                 viewModel.deleteProjectImagesOnly(project, tiles)
-                            },
-                            onProjectDeleted = { project ->
-                                viewModel.deleteProjectComplete(applicationContext, project)
                             },
                             onProjectUpdated = { project, newUri, isBackground, shapeIndex ->
                                 viewModel.updateProject(applicationContext, project, newUri, isBackground, shapeIndex)
