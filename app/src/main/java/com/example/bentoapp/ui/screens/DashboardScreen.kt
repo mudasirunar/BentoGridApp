@@ -11,6 +11,8 @@ import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.togetherWith
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import kotlinx.coroutines.launch
@@ -25,14 +27,29 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.rounded.ArrowBack
+import androidx.compose.material.icons.automirrored.rounded.ArrowForward
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Folder
+import androidx.compose.material.icons.filled.Image
+import androidx.compose.material.icons.rounded.Close
+import androidx.compose.material.icons.rounded.Search
+import androidx.compose.material.icons.rounded.SearchOff
+import androidx.compose.material.icons.rounded.ArrowForward
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -66,6 +83,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.zIndex
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
@@ -74,6 +93,11 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.graphics.luminance
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.platform.LocalDensity
 import com.example.bentoapp.R
 import com.example.bentoapp.data.ProjectEntity
 import com.example.bentoapp.data.BentoEntity
@@ -81,23 +105,33 @@ import com.example.bentoapp.ui.components.AddProjectDialog
 import com.example.bentoapp.ui.components.BentoEmptyAnimation
 import com.example.bentoapp.ui.components.BentoFab
 import com.example.bentoapp.ui.components.ProjectCard
+import com.example.bentoapp.ui.components.BentoBottomNavigation
+import com.example.bentoapp.ui.screens.SettingsScreen
+import com.example.bentoapp.utils.PreferenceManager
+import com.example.bentoapp.viewmodel.BentoViewModel
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun DashboardScreen(
     projects: List<ProjectEntity>,
     projectCounts: Map<Int, com.example.bentoapp.data.ProjectCounts>,
+    preferenceManager: PreferenceManager,
+    currentThemeMode: com.example.bentoapp.utils.ThemeMode,
     onProjectClick: (ProjectEntity) -> Unit,
     onProjectCreated: suspend (String, String, Boolean, Int) -> ProjectEntity,
     onProjectDeletedImmediate: (ProjectEntity, (List<BentoEntity>) -> Unit) -> Unit,
     onUndoProjectDelete: (ProjectEntity, List<BentoEntity>) -> Unit,
     onProjectDeleteConfirm: (ProjectEntity, List<BentoEntity>) -> Unit,
-    onProjectDeleted: (ProjectEntity) -> Unit,
     onProjectUpdated: (ProjectEntity, String, Boolean, Int) -> Unit
 ) {
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
     var showAddDialog by rememberSaveable { mutableStateOf(false) }
+    var selectedTab by rememberSaveable { mutableStateOf("collections") }
+    
+    // ── Search State ──
+    var searchQuery by rememberSaveable { mutableStateOf("") }
+    var isSearchActive by rememberSaveable { mutableStateOf(false) }
 
     val ProjectSaver: Saver<ProjectEntity?, *> = mapSaver(
         save = { project ->
@@ -137,8 +171,18 @@ fun DashboardScreen(
         derivedStateOf { listState.firstVisibleItemIndex <= 1 }
     }
 
+    // ── Dynamic Padding State ──
+    val density = LocalDensity.current
+    var bottomBarHeight by remember { mutableStateOf(94.dp) }
+    var fabHeight by remember { mutableStateOf(64.dp) }
+
     val snackbarBottomPadding by animateDpAsState(
-        targetValue = if (fabVisible) 66.dp else 24.dp,
+        targetValue = if (fabVisible && selectedTab == "collections") {
+            // Add a precise margin to account for FAB's 24dp offset + its height + 8dp gap
+            bottomBarHeight + fabHeight + 32.dp 
+        } else {
+            bottomBarHeight + 12.dp
+        },
         animationSpec = spring(
             dampingRatio = Spring.DampingRatioLowBouncy,
             stiffness = Spring.StiffnessMediumLow
@@ -163,6 +207,14 @@ fun DashboardScreen(
             }
         } else {
             vibrator.vibrate(15)
+        }
+    }
+
+    val keyboardController = androidx.compose.ui.platform.LocalSoftwareKeyboardController.current
+
+    LaunchedEffect(projectToDelete) {
+        if (projectToDelete != null) {
+            keyboardController?.hide()
         }
     }
 
@@ -198,9 +250,22 @@ fun DashboardScreen(
         }
     }
 
-    val visibleProjects by remember(projects, pendingDeletions.size) {
+    val visibleProjects by remember(projects, pendingDeletions.size, searchQuery, isSearchActive, selectedTab) {
         derivedStateOf {
-            projects.filter { it.id !in pendingDeletions.keys }
+            val filtered = projects.filter { it.id !in pendingDeletions.keys }
+
+            if (isSearchActive && selectedTab == "collections" && searchQuery.isNotEmpty()) {
+                filtered.filter { 
+                    it.name.contains(searchQuery, ignoreCase = true) 
+                }.sortedWith(
+                    compareBy<ProjectEntity> { 
+                        val index = it.name.indexOf(searchQuery, ignoreCase = true)
+                        if (index == -1) Int.MAX_VALUE else index
+                    }.thenBy { it.name.lowercase() }
+                )
+            } else {
+                filtered
+            }
         }
     }
 
@@ -222,81 +287,194 @@ fun DashboardScreen(
             containerColor = Color.Transparent,
             contentColor = MaterialTheme.colorScheme.onBackground,
             snackbarHost = {},
-            floatingActionButtonPosition = FabPosition.Center,
-            floatingActionButton = {
-                BentoFab(
-                    onClick = {
-                        triggerHaptic("CONFIRM")
-                        showAddDialog = true
-                    },
-                    visible = fabVisible
-                )
-            }
         ) { innerPadding ->
+            val topPadding = innerPadding.calculateTopPadding()
+            
             AnimatedContent(
-                targetState = if (projects.isEmpty()) "empty" else "content",
-                transitionSpec = { fadeIn(tween(400)) togetherWith fadeOut(tween(400)) },
-                label = "dashboardState"
-            ) { state ->
-                when (state) {
-                    "empty" -> EmptyShelfView(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .padding(innerPadding)
-                    )
+                targetState = selectedTab,
+                transitionSpec = {
+                    val indexMap = mapOf("collections" to 0, "gallery" to 1, "settings" to 2)
+                    val targetIndex = indexMap[targetState] ?: 0
+                    val initialIndex = indexMap[initialState] ?: 0
 
-                    "content" -> LazyColumn(
-                        state = listState,
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .padding(innerPadding),
-                        contentPadding = PaddingValues(
-                            start = 20.dp,
-                            end = 20.dp,
-                            top = 100.dp,
-                            bottom = 100.dp
-                        ),
-                        verticalArrangement = Arrangement.spacedBy(12.dp)
-                    ) {
-                        itemsIndexed(
-                            items = projects.filter { it.id !in pendingDeletions.keys },
-                            key = { _, project -> project.id }
-                        ) { _, project ->
-                            Box(
-                                modifier = Modifier.animateItem(
-                                    fadeInSpec = tween(400),
-                                    fadeOutSpec = tween(400),
-                                    placementSpec = tween(400)
+                    if (targetIndex > initialIndex) {
+                        (slideInHorizontally { width -> width / 3 } + fadeIn(tween(350))).togetherWith(
+                            slideOutHorizontally { width -> -width / 3 } + fadeOut(tween(350))
+                        )
+                    } else {
+                        (slideInHorizontally { width -> -width / 3 } + fadeIn(tween(350))).togetherWith(
+                            slideOutHorizontally { width -> width / 3 } + fadeOut(tween(350))
+                        )
+                    }
+                },
+                label = "dashboardTab"
+            ) { tab ->
+                when (tab) {
+                    "collections" -> {
+                        AnimatedContent(
+                            targetState = if (projects.isEmpty()) "empty" else if (isSearchActive && visibleProjects.isEmpty()) "no_results" else "content",
+                            transitionSpec = { fadeIn(tween(400)) togetherWith fadeOut(tween(400)) },
+                            label = "dashboardState"
+                        ) { state ->
+                            when (state) {
+                                "empty" -> EmptyShelfView(
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .padding(top = topPadding)
                                 )
-                            ) {
-                                ProjectCard(
-                                    project = project,
-                                    counts = projectCounts[project.id],
-                                    onClick = { onProjectClick(project) },
-                                    onDeleteRequest = { projectToDelete = project },
-                                    onEditRequest = { projectToEdit = project },
-                                    onHaptic = { type -> triggerHaptic(type) }
+
+                                "no_results" -> NoResultsFoundView(
+                                    searchQuery = searchQuery,
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .padding(top = topPadding)
                                 )
+
+                                "content" -> LazyColumn(
+                                    state = listState,
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .padding(top = topPadding),
+                                    contentPadding = PaddingValues(
+                                        start = 20.dp,
+                                        end = 20.dp,
+                                        // Top offset accounts for the overlaid top bar height (~100dp)
+                                        top = 100.dp,
+                                        // Padding to clear both FAB and bottom bar comfortably
+                                        bottom = bottomBarHeight + 100.dp
+                                    ),
+                                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                                ) {
+                                    itemsIndexed(
+                                        items = visibleProjects,
+                                        key = { _, project -> project.id }
+                                    ) { _, project ->
+                                        Box(
+                                            modifier = Modifier.animateItem(
+                                                fadeInSpec = tween(400),
+                                                fadeOutSpec = tween(400),
+                                                placementSpec = tween(400)
+                                            )
+                                        ) {
+                                            ProjectCard(
+                                                project = project,
+                                                counts = projectCounts[project.id],
+                                                onClick = { onProjectClick(project) },
+                                                onDeleteRequest = { projectToDelete = project },
+                                                onEditRequest = { projectToEdit = project },
+                                                onHaptic = { type -> triggerHaptic(type) }
+                                            )
+                                        }
+                                    }
+                                }
                             }
                         }
+                    }
+                    "gallery" -> {
+                        GalleryScreen(
+                            bottomPadding = bottomBarHeight,
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .padding(top = topPadding)
+                        )
+                    }
+                    "settings" -> {
+                        SettingsScreen(
+                            currentThemeMode = currentThemeMode,
+                            onThemeSelected = { mode ->
+                                scope.launch { preferenceManager.setThemeMode(mode) }
+                            },
+                            bottomPadding = bottomBarHeight,
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .padding(top = topPadding)
+                        )
                     }
                 }
             }
         }
 
+        // ── Floating UI Layer ──
+
+        // 0. Dynamic Scrim (Soft Gradient behind the islands)
+        Box(
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .fillMaxWidth()
+                .height(bottomBarHeight + fabHeight + 60.dp)
+                .background(
+                    brush = androidx.compose.ui.graphics.Brush.verticalGradient(
+                        colors = listOf(
+                            Color.Transparent,
+                            MaterialTheme.colorScheme.background.copy(alpha = 0.4f), // Balanced middle
+                            MaterialTheme.colorScheme.background.copy(alpha = 0.85f) // Balanced bottom
+                        )
+                    )
+                )
+        )
+        
+        // 1. FAB (Floating Island Style)
+        Box(
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .padding(bottom = bottomBarHeight + 24.dp)
+                .onGloballyPositioned { coordinates ->
+                    fabHeight = with(density) { coordinates.size.height.toDp() }
+                }
+        ) {
+            BentoFab(
+                onClick = {
+                    triggerHaptic("CONFIRM")
+                    showAddDialog = true
+                },
+                visible = fabVisible && selectedTab == "collections"
+            )
+        }
+
+        // 2. Bottom Nav (Floating Island Style)
+        Box(
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .navigationBarsPadding()
+                .padding(bottom = 16.dp, start = 24.dp, end = 24.dp)
+                .zIndex(15f)
+                .onGloballyPositioned { coordinates ->
+                    bottomBarHeight = with(density) { coordinates.size.height.toDp() }
+                },
+            contentAlignment = Alignment.Center
+        ) {
+            BentoBottomNavigation(
+                selectedTab = selectedTab,
+                onTabSelected = { tab ->
+                    triggerHaptic("TICK")
+                    selectedTab = tab
+                }
+            )
+        }
+
         // ── TopBar overlaid on top of everything — truly transparent when at top ──
-        DashboardTopBar(isScrolled = isScrolled.value)
+        DashboardTopBar(
+            isScrolled = isScrolled.value,
+            selectedTab = selectedTab,
+            searchQuery = searchQuery,
+            isSearchActive = isSearchActive,
+            onSearchQueryChange = { searchQuery = it },
+            onSearchActiveChange = { active ->
+                isSearchActive = active
+                if (!active) searchQuery = ""
+            }
+        )
 
         // ── Snackbar ──
         Box(
             modifier = Modifier
-                .fillMaxSize()
-                .padding(bottom = snackbarBottomPadding),
+                .fillMaxSize(),
             contentAlignment = Alignment.BottomCenter
         ) {
             SnackbarHost(
                 hostState = snackbarHostState,
-                modifier = Modifier.padding(bottom = snackbarBottomPadding)
+                modifier = Modifier
+                    .padding(bottom = snackbarBottomPadding)
             ) { data ->
                 val isDelete = data.visuals.message.contains("removed")
                 Snackbar(
@@ -352,7 +530,9 @@ fun DashboardScreen(
             Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .background(Color.Black.copy(alpha = 0.4f)),
+                    .zIndex(100f) // HIGHEST Z-INDEX
+                    .background(Color.Black.copy(alpha = 0.4f))
+                    .imePadding(), // Smartly avoid keyboard
                 contentAlignment = Alignment.BottomCenter
             ) {
                 Box(
@@ -510,7 +690,17 @@ fun DashboardScreen(
 }
 
 @Composable
-private fun DashboardTopBar(isScrolled: Boolean) {
+private fun DashboardTopBar(
+    isScrolled: Boolean,
+    selectedTab: String,
+    searchQuery: String,
+    isSearchActive: Boolean,
+    onSearchQueryChange: (String) -> Unit,
+    onSearchActiveChange: (Boolean) -> Unit
+) {
+    val focusRequester = remember { FocusRequester() }
+    val focusManager = androidx.compose.ui.platform.LocalFocusManager.current
+    val keyboardController = androidx.compose.ui.platform.LocalSoftwareKeyboardController.current
 
     val bgAlpha by animateFloatAsState(
         targetValue = if (isScrolled) 0.82f else 0f,
@@ -542,17 +732,33 @@ private fun DashboardTopBar(isScrolled: Boolean) {
         titleColorAlpha
     )
 
-    val logoRotation by animateFloatAsState(
-        targetValue = if (isScrolled) 360f else 0f,
-        animationSpec = tween(durationMillis = 600, easing = FastOutSlowInEasing),
-        label = "logoRotation"
+    // Search Animations
+    val searchAlpha by animateFloatAsState(
+        targetValue = if (isSearchActive) 1f else 0f,
+        animationSpec = tween(300),
+        label = "searchAlpha"
     )
 
-    val logoScale by animateFloatAsState(
-        targetValue = if (isScrolled) 0.86f else 1f,
-        animationSpec = tween(durationMillis = 280, easing = FastOutSlowInEasing),
-        label = "logoScale"
+    val titleAlpha by animateFloatAsState(
+        targetValue = if (isSearchActive) 0f else 1f,
+        animationSpec = tween(300),
+        label = "titleAlpha"
     )
+
+    val titleTranslationX by animateFloatAsState(
+        targetValue = if (isSearchActive) -40f else 0f,
+        animationSpec = spring(dampingRatio = Spring.DampingRatioLowBouncy),
+        label = "titleTranslationX"
+    )
+
+    LaunchedEffect(isSearchActive) {
+        if (isSearchActive) {
+            focusRequester.requestFocus()
+        } else {
+            focusManager.clearFocus()
+            keyboardController?.hide()
+        }
+    }
 
     Box(
         modifier = Modifier
@@ -569,42 +775,172 @@ private fun DashboardTopBar(isScrolled: Boolean) {
             .background(
                 color = MaterialTheme.colorScheme.background.copy(alpha = bgAlpha)
             )
+            .clickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null,
+                onClick = { /* Consume */ }
+            )
             .statusBarsPadding()
             .padding(horizontal = 24.dp)
             .padding(top = 20.dp, bottom = 16.dp)
-            .clickable(enabled = false) {}
     ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            // Title — color interpolates from onSurface to primary as you scroll
-            Text(
-                text = "My Collections",
-                style = MaterialTheme.typography.displaySmall,
-                fontWeight = FontWeight.ExtraBold,
-                letterSpacing = (-1.5).sp,
-                color = titleColor,
-                modifier = Modifier.graphicsLayer {
-                    scaleX = titleScale
-                    scaleY = titleScale
-                    translationY = titleOffsetY
-                    transformOrigin = TransformOrigin(0f, 0.5f)
+        Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.CenterStart) {
+            // ── Title Section ──
+            if (titleAlpha > 0f) {
+                Text(
+                    text = when (selectedTab) {
+                        "collections" -> "My Collections"
+                        "gallery" -> "Gallery Space"
+                        else -> "Settings"
+                    },
+                    style = MaterialTheme.typography.displaySmall,
+                    fontWeight = FontWeight.ExtraBold,
+                    letterSpacing = (-1.5).sp,
+                    color = titleColor,
+                    modifier = Modifier
+                        .graphicsLayer {
+                            scaleX = titleScale
+                            scaleY = titleScale
+                            translationY = titleOffsetY
+                            translationX = titleTranslationX
+                            alpha = titleAlpha
+                            transformOrigin = TransformOrigin(0f, 0.5f)
+                        }
+                )
+            }
+
+            // ── Search Bar Section ──
+            if (isSearchActive) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(52.dp)
+                        .graphicsLayer { alpha = searchAlpha },
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    androidx.compose.material3.TextField(
+                        value = searchQuery,
+                        onValueChange = onSearchQueryChange,
+                        modifier = Modifier
+                            .weight(1f)
+                            .focusRequester(focusRequester),
+                        placeholder = {
+                            Text(
+                                "Search collections...",
+                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f)
+                            )
+                        },
+                        colors = androidx.compose.material3.TextFieldDefaults.colors(
+                            focusedContainerColor = Color.Transparent,
+                            unfocusedContainerColor = Color.Transparent,
+                            disabledContainerColor = Color.Transparent,
+                            focusedIndicatorColor = Color.Transparent,
+                            unfocusedIndicatorColor = Color.Transparent,
+                            cursorColor = MaterialTheme.colorScheme.primary
+                        ),
+                        textStyle = MaterialTheme.typography.bodyLarge.copy(
+                            fontWeight = FontWeight.SemiBold,
+                            color = MaterialTheme.colorScheme.onSurface
+                        ),
+                        singleLine = true,
+                        trailingIcon = {
+                            if (searchQuery.isNotEmpty()) {
+                                androidx.compose.material3.IconButton(onClick = { onSearchQueryChange("") }) {
+                                    Icon(
+                                        imageVector = Icons.Rounded.Close,
+                                        contentDescription = "Clear",
+                                        tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
+                                    )
+                                }
+                            }
+                        }
+                    )
+
+                    Spacer(Modifier.width(8.dp))
+
+                    // Exit Search Button
+                    androidx.compose.material3.IconButton(
+                        onClick = { onSearchActiveChange(false) },
+                        modifier = Modifier
+                            .size(40.dp)
+                            .background(
+                                MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                                RoundedCornerShape(12.dp)
+                            )
+                    ) {
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Rounded.ArrowForward,
+                            contentDescription = "Back",
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
                 }
+            }
+
+            // ── Search Trigger Button (Only on Collections tab) ──
+            if (selectedTab == "collections" && !isSearchActive) {
+                androidx.compose.material3.IconButton(
+                    onClick = { onSearchActiveChange(true) },
+                    modifier = Modifier
+                        .align(Alignment.CenterEnd)
+                        .size(44.dp)
+                        .background(
+                            MaterialTheme.colorScheme.primary.copy(alpha = 0.1f),
+                            RoundedCornerShape(14.dp)
+                        )
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.Search,
+                        contentDescription = "Search",
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(22.dp)
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun NoResultsFoundView(searchQuery: String, modifier: Modifier = Modifier) {
+    Box(modifier = modifier, contentAlignment = Alignment.Center) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center,
+            modifier = Modifier.padding(24.dp)
+        ) {
+            Surface(
+                shape = RoundedCornerShape(24.dp),
+                color = MaterialTheme.colorScheme.primary.copy(alpha = 0.08f),
+                modifier = Modifier.size(100.dp)
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(
+                        imageVector = Icons.Rounded.SearchOff,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.6f),
+                        modifier = Modifier.size(44.dp)
+                    )
+                }
+            }
+
+            Spacer(Modifier.height(24.dp))
+
+            Text(
+                text = "No matches for \"$searchQuery\"",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.onBackground
             )
 
-            Icon(
-                painter = painterResource(id = R.drawable.ic_launcher_foreground),
-                contentDescription = null,
-                tint = Color.Unspecified,
-                modifier = Modifier
-                    .size(52.dp)
-                    .graphicsLayer {
-                        rotationZ = logoRotation
-                        scaleX = logoScale
-                        scaleY = logoScale
-                    }
+            Spacer(Modifier.height(8.dp))
+
+            Text(
+                text = "Check the spelling or try searching for something else.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f),
+                textAlign = androidx.compose.ui.text.style.TextAlign.Center
             )
         }
     }

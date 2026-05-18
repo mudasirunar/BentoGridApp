@@ -108,6 +108,7 @@ fun AddProjectDialog(
         Box(
             modifier = Modifier
                 .fillMaxWidth()
+                .background(Color.Transparent)
                 .padding(horizontal = 20.dp)
                 .graphicsLayer {
                     scaleX = dialogScale
@@ -119,6 +120,7 @@ fun AddProjectDialog(
             Surface(
                 modifier = Modifier
                     .fillMaxWidth()
+                    .clip(RoundedCornerShape(36.dp))
                     .border(
                         width = 0.5.dp,
                         brush = Brush.verticalGradient(
@@ -132,7 +134,7 @@ fun AddProjectDialog(
                 shape = RoundedCornerShape(36.dp),
                 color = MaterialTheme.colorScheme.surface,
                 tonalElevation = 0.dp,
-                shadowElevation = 24.dp
+                shadowElevation = 0.dp
             ) {
                 Column(
                     modifier = Modifier.padding(28.dp),
