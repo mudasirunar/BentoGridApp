@@ -1,4 +1,4 @@
-package com.example.bentoapp.ui.screens
+﻿package com.example.bentoapp.ui.screens
 
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.Spring
@@ -13,7 +13,6 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
@@ -24,7 +23,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -38,6 +37,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -50,7 +50,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
@@ -59,12 +58,13 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import coil.compose.AsyncImage
 import com.example.bentoapp.data.BentoEntity
 import com.example.bentoapp.ui.components.BentoLightbox
+import com.example.bentoapp.ui.components.GalleryGrid
+import com.example.bentoapp.ui.components.GalleryShimmer
 import com.example.bentoapp.ui.components.SimpleTopBar
+import com.example.bentoapp.ui.components.packGalleryTiles
 import com.example.bentoapp.viewmodel.BentoViewModel
-import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
@@ -72,17 +72,8 @@ import java.util.Calendar
 import java.util.Date
 import java.util.Locale
 
-// ─── 1. CORE UNIFIED GRID REPRESENTATIONS ──────────────────────────────────
-sealed class LayoutBlock {
-    abstract val keyId: String
-    data class UniformRow(val items: List<BentoEntity>, val maxColumns: Int, override val keyId: String) : LayoutBlock()
-    data class FeaturedSquareLeft(val bigItem: BentoEntity, val smallItems: List<BentoEntity>, val maxColumns: Int, override val keyId: String) : LayoutBlock()
-    data class FeaturedSquareCenter(val bigItem: BentoEntity, val smallItems: List<BentoEntity>, val maxColumns: Int, override val keyId: String) : LayoutBlock()
-    data class FeaturedSquareRight(val bigItem: BentoEntity, val smallItems: List<BentoEntity>, val maxColumns: Int, override val keyId: String) : LayoutBlock()
-    data class FeaturedPortraitLeft(val bigItem: BentoEntity, val smallItems: List<BentoEntity>, val maxColumns: Int, override val keyId: String) : LayoutBlock()
-    data class FeaturedPortraitCenter(val bigItem: BentoEntity, val smallItems: List<BentoEntity>, val maxColumns: Int, override val keyId: String) : LayoutBlock()
-    data class FeaturedPortraitRight(val bigItem: BentoEntity, val smallItems: List<BentoEntity>, val maxColumns: Int, override val keyId: String) : LayoutBlock()
-}
+// ─── GALLERY SCREEN INITIALIZATION FLAG ───
+private var hasInitialGalleryRenderCompleted = false
 
 @Composable
 fun GalleryScreen(
@@ -92,6 +83,10 @@ fun GalleryScreen(
     listState: LazyListState = rememberLazyListState(),
     modifier: Modifier = Modifier
 ) {
+    val configuration = LocalConfiguration.current
+    val isLandscape = configuration.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE
+    val totalColumns = if (isLandscape) 8 else 4
+
     val galleryImages by viewModel.allGalleryImages.collectAsState()
 
     val sortedGalleryImages = remember(galleryImages) {
@@ -99,19 +94,56 @@ fun GalleryScreen(
     }
 
     var selectedViewerIndex by rememberSaveable { mutableStateOf<Int?>(null) }
+    var isReadyToRender by remember { mutableStateOf(hasInitialGalleryRenderCompleted) }
 
-    val handleImageClick: (BentoEntity) -> Unit = { tile ->
-        onImageClick(tile)
-        val index = sortedGalleryImages.indexOfFirst { it.id == tile.id }
-        if (index != -1) {
-            selectedViewerIndex = index
+    val gallerySections = remember(sortedGalleryImages, totalColumns, isReadyToRender) {
+        if (!isReadyToRender) return@remember emptyList()
+        val currentYear = Calendar.getInstance().get(Calendar.YEAR)
+        sortedGalleryImages.groupBy { formatGalleryDate(it.createdAt, currentYear) }.toList()
+    }
+
+    LaunchedEffect(Unit) {
+        if (!hasInitialGalleryRenderCompleted) {
+            delay(300) // Defer heavy layout inflation until tab slide animation completes
+            hasInitialGalleryRenderCompleted = true
+            isReadyToRender = true
         }
     }
 
-    val configuration = LocalConfiguration.current
-    val isLandscape = configuration.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE
-    val totalColumns = if (isLandscape) 8 else 4
-    val spacing = 2.dp
+    val handleImageClick: (BentoEntity) -> Unit = remember(sortedGalleryImages, onImageClick) {
+        { tile ->
+            onImageClick(tile)
+            val index = sortedGalleryImages.indexOfFirst { it.id == tile.id }
+            if (index != -1) {
+                selectedViewerIndex = index
+            }
+        }
+    }
+
+    // 🔥 THE FIX: Calculate the EXACT pixel height of every single section upfront.
+    val density = LocalDensity.current
+    val spacingPx = with(density) { 2.dp.toPx() }
+    val screenWidthPx = with(density) { configuration.screenWidthDp.dp.toPx() }
+    val unitWidthPx = (screenWidthPx - (spacingPx * (totalColumns - 1))) / totalColumns
+
+    // We enforce an exact 64dp header height so the math is 100% flawless
+    val headerHeightPx = with(density) { 64.dp.toPx() }
+    val bottomPaddingPx = with(density) { (bottomPadding + 16.dp).toPx() }
+
+    val sectionHeightsPx = remember(gallerySections, configuration, isReadyToRender) {
+        if (!isReadyToRender || gallerySections.isEmpty()) return@remember emptyList<Float>()
+        gallerySections.map { (_, images) ->
+            val packed = packGalleryTiles(images, totalColumns)
+            val rows = packed.maxOfOrNull { it.startRow + it.rowSpan } ?: 0
+            val gridHeight = if (rows > 0) (unitWidthPx * rows) + (spacingPx * (rows - 1)) else 0f
+            headerHeightPx + gridHeight
+        }
+    }
+
+    val totalListHeightPx = remember(sectionHeightsPx, isReadyToRender) {
+        if (!isReadyToRender || sectionHeightsPx.isEmpty()) 0f
+        else sectionHeightsPx.sum() + bottomPaddingPx
+    }
 
     Box(modifier = modifier.fillMaxSize()) {
         Column(
@@ -121,23 +153,14 @@ fun GalleryScreen(
         ) {
             SimpleTopBar(title = "Gallery")
 
-            if (galleryImages.isEmpty()) {
+            if (!isReadyToRender) {
+                GalleryShimmer(
+                    columns = totalColumns,
+                    modifier = Modifier.fillMaxSize().weight(1f)
+                )
+            } else if (galleryImages.isEmpty()) {
                 GalleryEmptyState(bottomPadding)
             } else {
-                val gallerySections = remember(sortedGalleryImages, totalColumns) {
-                    val grouped = sortedGalleryImages.groupBy { formatGalleryDate(it.createdAt) }
-                    grouped.map { (dateHeader, imagesForDate) ->
-                        Pair(dateHeader, calculateSequentialBlocks(imagesForDate, totalColumns))
-                    }
-                }
-
-                val screenWidth = configuration.screenWidthDp.dp
-                val itemSize = (screenWidth - (spacing * (totalColumns - 1))) / totalColumns
-
-                val squareFeaturedSize = (itemSize * 2) + spacing
-                val portraitFeaturedWidth = (itemSize * 2) + spacing
-                val portraitFeaturedHeight = (itemSize * 3) + (spacing * 2)
-
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
@@ -148,196 +171,51 @@ fun GalleryScreen(
                         modifier = Modifier.fillMaxSize(),
                         contentPadding = PaddingValues(bottom = bottomPadding + 16.dp)
                     ) {
-                        gallerySections.forEach { (dateHeader, blocksForDate) ->
-                            item(key = "header_$dateHeader") {
-                                Text(
-                                    text = dateHeader,
-                                    style = MaterialTheme.typography.titleMedium,
-                                    fontWeight = FontWeight.Bold,
-                                    color = MaterialTheme.colorScheme.onBackground,
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(start = 16.dp, top = 24.dp, bottom = 12.dp)
-                                )
-                            }
-
-                            items(
-                                items = blocksForDate,
-                                key = { it.keyId }
-                            ) { block ->
-                                when (block) {
-                                    is LayoutBlock.UniformRow -> {
-                                        Row(
-                                            modifier = Modifier.fillMaxWidth().padding(bottom = spacing),
-                                            horizontalArrangement = Arrangement.spacedBy(spacing)
-                                        ) {
-                                            block.items.forEach { tile ->
-                                                GalleryImageTile(tile, Modifier.size(itemSize)) { handleImageClick(tile) }
-                                            }
-                                            if (block.items.size < totalColumns) {
-                                                repeat(totalColumns - block.items.size) {
-                                                    Spacer(Modifier.size(itemSize))
-                                                }
-                                            }
-                                        }
-                                    }
-
-                                    is LayoutBlock.FeaturedSquareLeft -> {
-                                        Row(modifier = Modifier.fillMaxWidth().padding(bottom = spacing), horizontalArrangement = Arrangement.spacedBy(spacing)) {
-                                            GalleryImageTile(block.bigItem, Modifier.size(squareFeaturedSize)) { handleImageClick(block.bigItem) }
-                                            Column(verticalArrangement = Arrangement.spacedBy(spacing)) {
-                                                val sideColumns = totalColumns - 2
-                                                Row(horizontalArrangement = Arrangement.spacedBy(spacing)) {
-                                                    block.smallItems.take(sideColumns).forEach { tile ->
-                                                        GalleryImageTile(tile, Modifier.size(itemSize)) { handleImageClick(tile) }
-                                                    }
-                                                }
-                                                Row(horizontalArrangement = Arrangement.spacedBy(spacing)) {
-                                                    block.smallItems.drop(sideColumns).take(sideColumns).forEach { tile ->
-                                                        GalleryImageTile(tile, Modifier.size(itemSize)) { handleImageClick(tile) }
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    }
-
-                                    is LayoutBlock.FeaturedSquareCenter -> {
-                                        Row(modifier = Modifier.fillMaxWidth().padding(bottom = spacing), horizontalArrangement = Arrangement.spacedBy(spacing)) {
-                                            val side = (totalColumns - 2) / 2
-                                            Column(verticalArrangement = Arrangement.spacedBy(spacing)) {
-                                                Row(horizontalArrangement = Arrangement.spacedBy(spacing)) {
-                                                    block.smallItems.take(side).forEach { GalleryImageTile(it, Modifier.size(itemSize)) { handleImageClick(it) } }
-                                                }
-                                                Row(horizontalArrangement = Arrangement.spacedBy(spacing)) {
-                                                    block.smallItems.drop(side).take(side).forEach { GalleryImageTile(it, Modifier.size(itemSize)) { handleImageClick(it) } }
-                                                }
-                                            }
-                                            GalleryImageTile(block.bigItem, Modifier.size(squareFeaturedSize)) { handleImageClick(block.bigItem) }
-                                            Column(verticalArrangement = Arrangement.spacedBy(spacing)) {
-                                                Row(horizontalArrangement = Arrangement.spacedBy(spacing)) {
-                                                    block.smallItems.drop(side * 2).take(side).forEach { GalleryImageTile(it, Modifier.size(itemSize)) { handleImageClick(it) } }
-                                                }
-                                                Row(horizontalArrangement = Arrangement.spacedBy(spacing)) {
-                                                    block.smallItems.drop(side * 3).take(side).forEach { GalleryImageTile(it, Modifier.size(itemSize)) { handleImageClick(it) } }
-                                                }
-                                            }
-                                        }
-                                    }
-
-                                    is LayoutBlock.FeaturedSquareRight -> {
-                                        Row(modifier = Modifier.fillMaxWidth().padding(bottom = spacing), horizontalArrangement = Arrangement.spacedBy(spacing)) {
-                                            Column(verticalArrangement = Arrangement.spacedBy(spacing)) {
-                                                val sideColumns = totalColumns - 2
-                                                Row(horizontalArrangement = Arrangement.spacedBy(spacing)) {
-                                                    block.smallItems.take(sideColumns).forEach { tile ->
-                                                        GalleryImageTile(tile, Modifier.size(itemSize)) { handleImageClick(tile) }
-                                                    }
-                                                }
-                                                Row(horizontalArrangement = Arrangement.spacedBy(spacing)) {
-                                                    block.smallItems.drop(sideColumns).take(sideColumns).forEach { tile ->
-                                                        GalleryImageTile(tile, Modifier.size(itemSize)) { handleImageClick(tile) }
-                                                    }
-                                                }
-                                            }
-                                            GalleryImageTile(block.bigItem, Modifier.size(squareFeaturedSize)) { handleImageClick(block.bigItem) }
-                                        }
-                                    }
-
-                                    is LayoutBlock.FeaturedPortraitLeft -> {
-                                        Row(modifier = Modifier.fillMaxWidth().padding(bottom = spacing), horizontalArrangement = Arrangement.spacedBy(spacing)) {
-                                            GalleryImageTile(block.bigItem, Modifier.size(width = portraitFeaturedWidth, height = portraitFeaturedHeight)) { handleImageClick(block.bigItem) }
-                                            Column(verticalArrangement = Arrangement.spacedBy(spacing)) {
-                                                val sideColumns = totalColumns - 2
-                                                Row(horizontalArrangement = Arrangement.spacedBy(spacing)) {
-                                                    block.smallItems.take(sideColumns).forEach { tile ->
-                                                        GalleryImageTile(tile, Modifier.size(itemSize)) { handleImageClick(tile) }
-                                                    }
-                                                }
-                                                Row(horizontalArrangement = Arrangement.spacedBy(spacing)) {
-                                                    block.smallItems.drop(sideColumns).take(sideColumns).forEach { tile ->
-                                                        GalleryImageTile(tile, Modifier.size(itemSize)) { handleImageClick(tile) }
-                                                    }
-                                                }
-                                                Row(horizontalArrangement = Arrangement.spacedBy(spacing)) {
-                                                    block.smallItems.drop(sideColumns * 2).take(sideColumns).forEach { tile ->
-                                                        GalleryImageTile(tile, Modifier.size(itemSize)) { handleImageClick(tile) }
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    }
-
-                                    is LayoutBlock.FeaturedPortraitCenter -> {
-                                        Row(modifier = Modifier.fillMaxWidth().padding(bottom = spacing), horizontalArrangement = Arrangement.spacedBy(spacing)) {
-                                            val side = (totalColumns - 2) / 2
-                                            Column(verticalArrangement = Arrangement.spacedBy(spacing)) {
-                                                Row(horizontalArrangement = Arrangement.spacedBy(spacing)) {
-                                                    block.smallItems.take(side).forEach { GalleryImageTile(it, Modifier.size(itemSize)) { handleImageClick(it) } }
-                                                }
-                                                Row(horizontalArrangement = Arrangement.spacedBy(spacing)) {
-                                                    block.smallItems.drop(side).take(side).forEach { GalleryImageTile(it, Modifier.size(itemSize)) { handleImageClick(it) } }
-                                                }
-                                                Row(horizontalArrangement = Arrangement.spacedBy(spacing)) {
-                                                    block.smallItems.drop(side * 2).take(side).forEach { GalleryImageTile(it, Modifier.size(itemSize)) { handleImageClick(it) } }
-                                                }
-                                            }
-                                            GalleryImageTile(block.bigItem, Modifier.size(width = portraitFeaturedWidth, height = portraitFeaturedHeight)) { handleImageClick(block.bigItem) }
-                                            Column(verticalArrangement = Arrangement.spacedBy(spacing)) {
-                                                Row(horizontalArrangement = Arrangement.spacedBy(spacing)) {
-                                                    block.smallItems.drop(side * 3).take(side).forEach { GalleryImageTile(it, Modifier.size(itemSize)) { handleImageClick(it) } }
-                                                }
-                                                Row(horizontalArrangement = Arrangement.spacedBy(spacing)) {
-                                                    block.smallItems.drop(side * 4).take(side).forEach { GalleryImageTile(it, Modifier.size(itemSize)) { handleImageClick(it) } }
-                                                }
-                                                Row(horizontalArrangement = Arrangement.spacedBy(spacing)) {
-                                                    block.smallItems.drop(side * 5).take(side).forEach { GalleryImageTile(it, Modifier.size(itemSize)) { handleImageClick(it) } }
-                                                }
-                                            }
-                                        }
-                                    }
-
-                                    is LayoutBlock.FeaturedPortraitRight -> {
-                                        Row(modifier = Modifier.fillMaxWidth().padding(bottom = spacing), horizontalArrangement = Arrangement.spacedBy(spacing)) {
-                                            Column(verticalArrangement = Arrangement.spacedBy(spacing)) {
-                                                val sideColumns = totalColumns - 2
-                                                Row(horizontalArrangement = Arrangement.spacedBy(spacing)) {
-                                                    block.smallItems.take(sideColumns).forEach { tile ->
-                                                        GalleryImageTile(tile, Modifier.size(itemSize)) { handleImageClick(tile) }
-                                                    }
-                                                }
-                                                Row(horizontalArrangement = Arrangement.spacedBy(spacing)) {
-                                                    block.smallItems.drop(sideColumns).take(sideColumns).forEach { tile ->
-                                                        GalleryImageTile(tile, Modifier.size(itemSize)) { handleImageClick(tile) }
-                                                    }
-                                                }
-                                                Row(horizontalArrangement = Arrangement.spacedBy(spacing)) {
-                                                    block.smallItems.drop(sideColumns * 2).take(sideColumns).forEach { tile ->
-                                                        GalleryImageTile(tile, Modifier.size(itemSize)) { handleImageClick(tile) }
-                                                    }
-                                                }
-                                            }
-                                            GalleryImageTile(block.bigItem, Modifier.size(width = portraitFeaturedWidth, height = portraitFeaturedHeight)) { handleImageClick(block.bigItem) }
-                                        }
-                                    }
+                        // By merging Header and Grid into one item, the indices map 1:1 perfectly with our heights
+                        itemsIndexed(
+                            items = gallerySections,
+                            key = { _, item -> item.first },
+                            contentType = { _, _ -> "DateSection" }
+                        ) { index, (dateHeader, imagesForDate) ->
+                            Column(modifier = Modifier.fillMaxWidth()) {
+                                // Locked 64dp header to match our math perfectly
+                                Box(
+                                    modifier = Modifier.height(64.dp).fillMaxWidth().padding(start = 16.dp),
+                                    contentAlignment = Alignment.CenterStart
+                                ) {
+                                    Text(
+                                        text = dateHeader,
+                                        style = MaterialTheme.typography.titleMedium,
+                                        fontWeight = FontWeight.Bold,
+                                        color = MaterialTheme.colorScheme.onBackground
+                                    )
                                 }
+
+                                GalleryGrid(
+                                    tiles = imagesForDate,
+                                    columns = totalColumns,
+                                    spacingDp = 2,
+                                    onTileClick = handleImageClick,
+                                    modifier = Modifier.fillMaxWidth()
+                                )
                             }
                         }
                     }
 
-                    GalleryFastScroller(
+                    GalleryScrollbar(
                         listState = listState,
+                        sectionHeightsPx = sectionHeightsPx,
+                        totalListHeightPx = totalListHeightPx,
                         bottomPadding = bottomPadding,
-                        estimatedRowHeight = itemSize,
                         modifier = Modifier.align(Alignment.CenterEnd)
                     )
                 }
             }
         }
 
-        // Full Screen Lightbox Overlay
         if (selectedViewerIndex != null && sortedGalleryImages.isNotEmpty()) {
             val safeIndex = selectedViewerIndex!!.coerceIn(0, sortedGalleryImages.lastIndex)
-
+            // 🚀 SNAPPY OPENING FIX: Wrap in a custom Dialog style to bypass default platform fade animations
             androidx.compose.ui.window.Dialog(
                 onDismissRequest = { selectedViewerIndex = null },
                 properties = androidx.compose.ui.window.DialogProperties(
@@ -361,78 +239,40 @@ fun GalleryScreen(
     }
 }
 
-// ─── 2. SEQUENTIAL PACKING ALGORITHM ───────────────────────────────────────
-fun calculateSequentialBlocks(images: List<BentoEntity>, columns: Int): List<LayoutBlock> {
-    val blocks = mutableListOf<LayoutBlock>()
-    var i = 0
-    var patternCounter = 0
-
-    while (i < images.size) {
-        val itemsLeft = images.size - i
-        val currentImage = images[i]
-
-        val isPortraitFeature = currentImage.id % 3 == 0
-        val isSquareFeature = currentImage.id % 2 == 0
-
-        // Accurate mathematical target layout rules tracking
-        val itemsNeededForSquare = 1 + (columns - 2) * 2
-        val itemsNeededForPortrait = 1 + (columns - 2) * 3
-
-        if (isPortraitFeature && itemsLeft >= itemsNeededForPortrait) {
-            val big = currentImage
-            val smalls = images.subList(i + 1, i + itemsNeededForPortrait)
-            when (patternCounter % 3) {
-                0 -> blocks.add(LayoutBlock.FeaturedPortraitLeft(big, smalls, columns, "fpl_${big.id}"))
-                1 -> blocks.add(LayoutBlock.FeaturedPortraitCenter(big, smalls, columns, "fpc_${big.id}"))
-                else -> blocks.add(LayoutBlock.FeaturedPortraitRight(big, smalls, columns, "fpr_${big.id}"))
-            }
-            i += itemsNeededForPortrait
-            patternCounter++
-        }
-        else if (isSquareFeature && itemsLeft >= itemsNeededForSquare) {
-            val big = currentImage
-            val smalls = images.subList(i + 1, i + itemsNeededForSquare)
-            when (patternCounter % 3) {
-                0 -> blocks.add(LayoutBlock.FeaturedSquareLeft(big, smalls, columns, "fsl_${big.id}"))
-                1 -> blocks.add(LayoutBlock.FeaturedSquareCenter(big, smalls, columns, "fsc_${big.id}"))
-                else -> blocks.add(LayoutBlock.FeaturedSquareRight(big, smalls, columns, "fsr_${big.id}"))
-            }
-            i += itemsNeededForSquare
-            patternCounter++
-        }
-        else {
-            val sliceSize = minOf(columns, itemsLeft)
-            blocks.add(
-                LayoutBlock.UniformRow(
-                    items = images.subList(i, i + sliceSize),
-                    maxColumns = columns,
-                    keyId = "uni_${images[i].id}"
-                )
-            )
-            i += sliceSize
-        }
-    }
-    return blocks
+// ─── DATE FORMATTER ───
+private val sameYearFormat = object : ThreadLocal<SimpleDateFormat>() {
+    override fun initialValue() = SimpleDateFormat("EEE, MMM d", Locale.getDefault())
+}
+private val diffYearFormat = object : ThreadLocal<SimpleDateFormat>() {
+    override fun initialValue() = SimpleDateFormat("EEE, MMM d, yyyy", Locale.getDefault())
+}
+private val calendarThreadLocal = object : ThreadLocal<Calendar>() {
+    override fun initialValue() = Calendar.getInstance()
 }
 
-// ─── 3. FAST SCROLLER ─────────────────────────────────────────────────────
+fun formatGalleryDate(timestamp: Long, currentYear: Int): String {
+    val date = Date(timestamp)
+    val calendar = calendarThreadLocal.get()!!.apply { time = date }
+    val isSameYear = calendar.get(Calendar.YEAR) == currentYear
+    return if (isSameYear) sameYearFormat.get()!!.format(date) else diffYearFormat.get()!!.format(date)
+}
+
 @Composable
-fun GalleryFastScroller(
+fun GalleryScrollbar(
     listState: LazyListState,
+    sectionHeightsPx: List<Float>,
+    totalListHeightPx: Float,
     bottomPadding: Dp,
-    estimatedRowHeight: Dp,
     modifier: Modifier = Modifier
 ) {
-    val layoutInfo = listState.layoutInfo
-    val isScrollable = layoutInfo.totalItemsCount > layoutInfo.visibleItemsInfo.size
-
-    if (!isScrollable) return
-
+    val coroutineScope = rememberCoroutineScope()
     var isDragging by remember { mutableStateOf(false) }
     var isShowing by remember { mutableStateOf(false) }
 
-    LaunchedEffect(listState.isScrollInProgress, isDragging) {
-        if (listState.isScrollInProgress || isDragging) {
+    val isScrollInProgress by remember { derivedStateOf { listState.isScrollInProgress } }
+
+    LaunchedEffect(isScrollInProgress, isDragging) {
+        if (isScrollInProgress || isDragging) {
             isShowing = true
         } else {
             delay(1500)
@@ -455,28 +295,37 @@ fun GalleryFastScroller(
     var trackHeightPx by remember { mutableFloatStateOf(0f) }
     val thumbHeight = 64.dp
     val thumbHeightPx = with(LocalDensity.current) { thumbHeight.toPx() }
-    val maxOffset = (trackHeightPx - thumbHeightPx).coerceAtLeast(0f)
 
-    val totalItems = layoutInfo.totalItemsCount
-    val visibleItems = layoutInfo.visibleItemsInfo.size
-    val maxIndex = (totalItems - visibleItems).coerceAtLeast(1)
+    // 🔥 READ PROGRESS: Flawless mapping of scroll position to thumb position
+    val scrollProgress by remember {
+        derivedStateOf {
+            val layoutInfo = listState.layoutInfo
+            val firstVisible = layoutInfo.visibleItemsInfo.firstOrNull() ?: return@derivedStateOf 0f
 
-    var dragProgress by remember { mutableFloatStateOf(0f) }
+            var scrolledY = 0f
+            // Add up the heights of everything above us
+            for (i in 0 until firstVisible.index) {
+                scrolledY += sectionHeightsPx.getOrElse(i) { 0f }
+            }
+            // Subtract offset (offset is negative as item scrolls up)
+            scrolledY -= firstVisible.offset
 
-    val targetProgress = if (isDragging) {
-        dragProgress
-    } else {
-        (listState.firstVisibleItemIndex.toFloat() / maxIndex).coerceIn(0f, 1f)
+            val viewportHeight = layoutInfo.viewportSize.height.toFloat()
+            val maxScrollY = (totalListHeightPx - viewportHeight).coerceAtLeast(1f)
+
+            (scrolledY / maxScrollY).coerceIn(0f, 1f)
+        }
     }
 
+    var dragProgress by remember { mutableFloatStateOf(0f) }
+    val currentProgress = if (isDragging) dragProgress else scrollProgress
+
+    val maxTrack = (trackHeightPx - thumbHeightPx).coerceAtLeast(0f)
     val thumbOffset by animateFloatAsState(
-        targetValue = maxOffset * targetProgress,
+        targetValue = maxTrack * currentProgress,
         animationSpec = if (isDragging) tween(0) else spring(stiffness = Spring.StiffnessMediumLow),
         label = "thumbOffset"
     )
-
-    val coroutineScope = rememberCoroutineScope()
-    val fallbackHeightPx = with(LocalDensity.current) { estimatedRowHeight.toPx() }
 
     val thumbColor by animateColorAsState(
         targetValue = if (isDragging) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f),
@@ -486,6 +335,32 @@ fun GalleryFastScroller(
         targetValue = if (isDragging) 12.dp else 6.dp,
         label = "thumbWidth"
     )
+
+    val performAbsoluteScroll: (Float) -> Unit = { progress ->
+        val viewportHeight = listState.layoutInfo.viewportSize.height.toFloat()
+        val maxScrollY = (totalListHeightPx - viewportHeight).coerceAtLeast(1f)
+        val targetPixelY = progress * maxScrollY
+
+        var accumulatedY = 0f
+        var targetIndex = 0
+        var targetOffset = 0f
+
+        for (i in sectionHeightsPx.indices) {
+            if (targetPixelY <= accumulatedY + sectionHeightsPx[i]) {
+                targetIndex = i
+                targetOffset = targetPixelY - accumulatedY
+                break
+            }
+            accumulatedY += sectionHeightsPx[i]
+            targetIndex = i
+            targetOffset = targetPixelY - accumulatedY
+        }
+
+        coroutineScope.launch {
+            // Jump exactly to the pixel depth! Bypasses all layout measuring walls.
+            listState.scrollToItem(targetIndex, targetOffset.toInt())
+        }
+    }
 
     Box(
         modifier = modifier
@@ -501,32 +376,16 @@ fun GalleryFastScroller(
                 detectVerticalDragGestures(
                     onDragStart = { offset ->
                         isDragging = true
-                        dragProgress = (offset.y / trackHeightPx).coerceIn(0f, 1f)
-                        val exactIndex = dragProgress * maxIndex
-                        coroutineScope.launch {
-                            listState.scrollToItem(exactIndex.toInt(), 0)
-                        }
+                        val touchY = offset.y - (thumbHeightPx / 2f)
+                        dragProgress = (touchY / maxTrack).coerceIn(0f, 1f)
+                        performAbsoluteScroll(dragProgress)
                     },
                     onDragEnd = { isDragging = false },
                     onDragCancel = { isDragging = false }
                 ) { change, dragAmount ->
                     change.consume()
-                    if (trackHeightPx > 0) {
-                        dragProgress = (change.position.y / trackHeightPx).coerceIn(0f, 1f)
-                        val visibleHeight = layoutInfo.viewportSize.height.toFloat()
-                        val avgHeight = if (layoutInfo.visibleItemsInfo.isNotEmpty()) {
-                            layoutInfo.visibleItemsInfo.sumOf { it.size }.toFloat() / layoutInfo.visibleItemsInfo.size
-                        } else {
-                            fallbackHeightPx
-                        }
-
-                        val estimatedTotalHeight = layoutInfo.totalItemsCount * avgHeight
-                        val listScrollablePx = (estimatedTotalHeight - visibleHeight).coerceAtLeast(1f)
-                        val trackScrollablePx = (trackHeightPx - thumbHeightPx).coerceAtLeast(1f)
-
-                        val scrollRatio = listScrollablePx / trackScrollablePx
-                        listState.dispatchRawDelta(dragAmount * scrollRatio)
-                    }
+                    dragProgress = (dragProgress + (dragAmount / maxTrack)).coerceIn(0f, 1f)
+                    performAbsoluteScroll(dragProgress)
                 }
             },
         contentAlignment = Alignment.TopEnd
@@ -541,36 +400,9 @@ fun GalleryFastScroller(
     }
 }
 
-fun formatGalleryDate(timestamp: Long): String {
-    val date = Date(timestamp)
-    val calendar = Calendar.getInstance().apply { time = date }
-    val currentCalendar = Calendar.getInstance()
-
-    val isSameYear = calendar.get(Calendar.YEAR) == currentCalendar.get(Calendar.YEAR)
-
-    val pattern = if (isSameYear) "EEE, MMM d" else "EEE, MMM d, yyyy"
-    return SimpleDateFormat(pattern, Locale.getDefault()).format(date)
-}
-
-// ─── 4. UI COMPONENTS ─────────────────────────────────────────────────────
-@Composable
-fun GalleryImageTile(tile: BentoEntity, modifier: Modifier, onClick: () -> Unit) {
-    Surface(
-        shape = RoundedCornerShape(0.dp),
-        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
-        modifier = modifier.clip(RoundedCornerShape(0.dp)).clickable { onClick() }
-    ) {
-        AsyncImage(
-            model = tile.imageUri,
-            contentDescription = null,
-            contentScale = ContentScale.Crop,
-            modifier = Modifier.fillMaxSize()
-        )
-    }
-}
-
 @Composable
 fun GalleryEmptyState(bottomPadding: Dp) {
+    // Same as before
     Box(
         modifier = Modifier.fillMaxSize(),
         contentAlignment = Alignment.Center

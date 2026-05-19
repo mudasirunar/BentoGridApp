@@ -15,11 +15,99 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.io.FileOutputStream
+import java.text.SimpleDateFormat
+import java.util.Calendar
+import java.util.Date
+import java.util.Locale
+
+// ─── CORE UNIFIED GRID REPRESENTATIONS ──────────────────────────────────
+sealed class LayoutBlock {
+    abstract val keyId: String
+    data class UniformRow(val items: List<BentoEntity>, val maxColumns: Int, override val keyId: String) : LayoutBlock()
+    data class FeaturedSquareLeft(val bigItem: BentoEntity, val smallItems: List<BentoEntity>, val maxColumns: Int, override val keyId: String) : LayoutBlock()
+    data class FeaturedSquareCenter(val bigItem: BentoEntity, val smallItems: List<BentoEntity>, val maxColumns: Int, override val keyId: String) : LayoutBlock()
+    data class FeaturedSquareRight(val bigItem: BentoEntity, val smallItems: List<BentoEntity>, val maxColumns: Int, override val keyId: String) : LayoutBlock()
+    data class FeaturedPortraitLeft(val bigItem: BentoEntity, val smallItems: List<BentoEntity>, val maxColumns: Int, override val keyId: String) : LayoutBlock()
+    data class FeaturedPortraitCenter(val bigItem: BentoEntity, val smallItems: List<BentoEntity>, val maxColumns: Int, override val keyId: String) : LayoutBlock()
+    data class FeaturedPortraitRight(val bigItem: BentoEntity, val smallItems: List<BentoEntity>, val maxColumns: Int, override val keyId: String) : LayoutBlock()
+}
+
+private val sameYearFormat = object : ThreadLocal<SimpleDateFormat>() {
+    override fun initialValue() = SimpleDateFormat("EEE, MMM d", Locale.getDefault())
+}
+private val diffYearFormat = object : ThreadLocal<SimpleDateFormat>() {
+    override fun initialValue() = SimpleDateFormat("EEE, MMM d, yyyy", Locale.getDefault())
+}
+private val calendarThreadLocal = object : ThreadLocal<Calendar>() {
+    override fun initialValue() = Calendar.getInstance()
+}
+
+fun formatGalleryDate(timestamp: Long, currentYear: Int): String {
+    val date = Date(timestamp)
+    val calendar = calendarThreadLocal.get()!!.apply { time = date }
+    val isSameYear = calendar.get(Calendar.YEAR) == currentYear
+    return if (isSameYear) sameYearFormat.get()!!.format(date) else diffYearFormat.get()!!.format(date)
+}
+
+fun calculateSequentialBlocks(images: List<BentoEntity>, columns: Int): List<LayoutBlock> {
+    val blocks = mutableListOf<LayoutBlock>()
+    var i = 0
+    var patternCounter = 0
+
+    while (i < images.size) {
+        val itemsLeft = images.size - i
+        val currentImage = images[i]
+
+        val isPortraitFeature = currentImage.id % 3 == 0
+        val isSquareFeature = currentImage.id % 2 == 0
+
+        // Accurate mathematical target layout rules tracking
+        val itemsNeededForSquare = 1 + (columns - 2) * 2
+        val itemsNeededForPortrait = 1 + (columns - 2) * 3
+
+        if (isPortraitFeature && itemsLeft >= itemsNeededForPortrait) {
+            val big = currentImage
+            val smalls = images.subList(i + 1, i + itemsNeededForPortrait)
+            when (patternCounter % 3) {
+                0 -> blocks.add(LayoutBlock.FeaturedPortraitLeft(big, smalls, columns, "fpl_${big.id}"))
+                1 -> blocks.add(LayoutBlock.FeaturedPortraitCenter(big, smalls, columns, "fpc_${big.id}"))
+                else -> blocks.add(LayoutBlock.FeaturedPortraitRight(big, smalls, columns, "fpr_${big.id}"))
+            }
+            i += itemsNeededForPortrait
+            patternCounter++
+        }
+        else if (isSquareFeature && itemsLeft >= itemsNeededForSquare) {
+            val big = currentImage
+            val smalls = images.subList(i + 1, i + itemsNeededForSquare)
+            when (patternCounter % 3) {
+                0 -> blocks.add(LayoutBlock.FeaturedSquareLeft(big, smalls, columns, "fsl_${big.id}"))
+                1 -> blocks.add(LayoutBlock.FeaturedSquareCenter(big, smalls, columns, "fsc_${big.id}"))
+                else -> blocks.add(LayoutBlock.FeaturedSquareRight(big, smalls, columns, "fsr_${big.id}"))
+            }
+            i += itemsNeededForSquare
+            patternCounter++
+        }
+        else {
+            val sliceSize = minOf(columns, itemsLeft)
+            blocks.add(
+                LayoutBlock.UniformRow(
+                    items = images.subList(i, i + sliceSize),
+                    maxColumns = columns,
+                    keyId = "uni_${images[i].id}"
+                )
+            )
+            i += sliceSize
+        }
+    }
+    return blocks
+}
+
 
 class BentoViewModel(private val dao: BentoDao) : ViewModel() {
 
@@ -28,24 +116,57 @@ class BentoViewModel(private val dao: BentoDao) : ViewModel() {
 
     val allProjects: StateFlow<List<ProjectEntity>> = dao.getAllProjects()
         .onEach { _isLoading.value = false }
+        .flowOn(Dispatchers.IO)
         .stateIn(
             scope = viewModelScope,
-            started = SharingStarted.WhileSubscribed(5000),
+            started = SharingStarted.Eagerly,
             initialValue = emptyList()
         )
 
     val allProjectCounts: StateFlow<Map<Int, com.example.bentoapp.data.ProjectCounts>> = dao.getAllProjectCounts()
         .map { list -> list.associateBy { it.projectId } }
+        .flowOn(Dispatchers.IO)
         .stateIn(
             scope = viewModelScope,
-            started = SharingStarted.WhileSubscribed(5000),
+            started = SharingStarted.Eagerly,
             initialValue = emptyMap()
         )
 
     val allGalleryImages: StateFlow<List<BentoEntity>> = dao.getAllGalleryImages()
+        .flowOn(Dispatchers.IO)
         .stateIn(
             scope = viewModelScope,
-            started = SharingStarted.WhileSubscribed(5000),
+            started = SharingStarted.Eagerly,
+            initialValue = emptyList()
+        )
+
+    val gallerySectionsPortrait: StateFlow<List<Pair<String, List<LayoutBlock>>>> = dao.getAllGalleryImages()
+        .map { images ->
+            val currentYear = Calendar.getInstance().get(Calendar.YEAR)
+            val grouped = images.groupBy { formatGalleryDate(it.createdAt, currentYear) }
+            grouped.map { (dateHeader, imagesForDate) ->
+                Pair(dateHeader, calculateSequentialBlocks(imagesForDate, 4))
+            }
+        }
+        .flowOn(Dispatchers.Default)
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.Eagerly,
+            initialValue = emptyList()
+        )
+
+    val gallerySectionsLandscape: StateFlow<List<Pair<String, List<LayoutBlock>>>> = dao.getAllGalleryImages()
+        .map { images ->
+            val currentYear = Calendar.getInstance().get(Calendar.YEAR)
+            val grouped = images.groupBy { formatGalleryDate(it.createdAt, currentYear) }
+            grouped.map { (dateHeader, imagesForDate) ->
+                Pair(dateHeader, calculateSequentialBlocks(imagesForDate, 8))
+            }
+        }
+        .flowOn(Dispatchers.Default)
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.Eagerly,
             initialValue = emptyList()
         )
 
