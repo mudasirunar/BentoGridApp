@@ -383,45 +383,41 @@ private fun LightboxTopControls(
             }
         }
 
-        // 🔥 THE FIX: By explicitly forcing a darkColorScheme, the Popup Window
-        // will NEVER turn white in Light Mode. It stays perfectly dark and glassy!
-        MaterialTheme(
-            colorScheme = androidx.compose.material3.darkColorScheme(
-                surface = Color.Black.copy(alpha = 0.85f),
-                onSurface = Color.White
-            )
+        DropdownMenu(
+            expanded = menuExpanded,
+            onDismissRequest = { menuExpanded = false },
+            offset = androidx.compose.ui.unit.DpOffset(0.dp, 8.dp),
+            shape = RoundedCornerShape(20.dp),
+            containerColor = Color.White.copy(alpha = 0.25f),
+            tonalElevation = 0.dp,
+            shadowElevation = 0.dp,
+            border = androidx.compose.foundation.BorderStroke(1.dp, Color.White.copy(alpha = 0.1f)),
+            modifier = Modifier.widthIn(min = 160.dp)
         ) {
-            DropdownMenu(
-                expanded = menuExpanded,
-                onDismissRequest = { menuExpanded = false },
-                shape = RoundedCornerShape(20.dp),
-                modifier = Modifier.widthIn(min = 160.dp)
-            ) {
-                DropdownMenuItem(
-                    text = { Text("Edit", fontWeight = FontWeight.Bold, color = Color.White) },
-                    leadingIcon = { Icon(Icons.Default.Edit, contentDescription = null, tint = Color(0xFF00B2FF)) },
-                    onClick = {
-                        menuExpanded = false
-                        onEdit()
-                    }
-                )
-                DropdownMenuItem(
-                    text = { Text("Share", fontWeight = FontWeight.Bold, color = Color.White) },
-                    leadingIcon = { Icon(Icons.Default.Share, contentDescription = null, tint = Color(0xFF10B981)) },
-                    onClick = {
-                        menuExpanded = false
-                        onShare()
-                    }
-                )
-                DropdownMenuItem(
-                    text = { Text("Delete", fontWeight = FontWeight.Bold, color = Color(0xFFDC2626)) },
-                    leadingIcon = { Icon(Icons.Default.Delete, contentDescription = null, tint = Color(0xFFDC2626)) },
-                    onClick = {
-                        menuExpanded = false
-                        onDelete()
-                    }
-                )
-            }
+            DropdownMenuItem(
+                text = { Text("Edit", fontWeight = FontWeight.Bold, color = Color.White) },
+                leadingIcon = { Icon(Icons.Default.Edit, contentDescription = null, tint = Color(0xFF00B2FF)) },
+                onClick = {
+                    menuExpanded = false
+                    onEdit()
+                }
+            )
+            DropdownMenuItem(
+                text = { Text("Share", fontWeight = FontWeight.Bold, color = Color.White) },
+                leadingIcon = { Icon(Icons.Default.Share, contentDescription = null, tint = Color(0xFF10B981)) },
+                onClick = {
+                    menuExpanded = false
+                    onShare()
+                }
+            )
+            DropdownMenuItem(
+                text = { Text("Delete", fontWeight = FontWeight.Bold, color = Color(0xFFDC2626)) },
+                leadingIcon = { Icon(Icons.Default.Delete, contentDescription = null, tint = Color(0xFFDC2626)) },
+                onClick = {
+                    menuExpanded = false
+                    onDelete()
+                }
+            )
         }
     }
 }

@@ -64,18 +64,17 @@ fun BentoFab(
     )
 
     // Visibility slide — only used in standalone mode
+    // We use a synchronized tween for both slide and alpha so the entrance
+    // and exit feel perfectly timed, smooth, and accessible.
     val visibilityOffset by animateFloatAsState(
-        targetValue = if (!compact && !visible) with(density) { 100.dp.toPx() } else 0f,
-        animationSpec = spring(
-            dampingRatio = Spring.DampingRatioMediumBouncy,
-            stiffness = Spring.StiffnessLow
-        ),
+        targetValue = if (!compact && !visible) with(density) { 150.dp.toPx() } else 0f,
+        animationSpec = tween(durationMillis = 350, easing = FastOutSlowInEasing),
         label = "slideAnimation"
     )
 
     val visibilityAlpha by animateFloatAsState(
         targetValue = if (!compact && !visible) 0f else 1f,
-        animationSpec = tween(300),
+        animationSpec = tween(durationMillis = 350, easing = FastOutSlowInEasing),
         label = "alphaAnimation"
     )
 
