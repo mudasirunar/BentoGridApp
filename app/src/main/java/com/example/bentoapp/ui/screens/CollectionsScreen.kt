@@ -43,6 +43,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.bentoapp.data.BentoEntity
 import com.example.bentoapp.data.ProjectEntity
 import com.example.bentoapp.data.ProjectCounts
 import com.example.bentoapp.ui.components.BentoEmptyAnimation
@@ -52,6 +53,8 @@ import com.example.bentoapp.ui.components.ProjectCard
 fun CollectionsScreen(
     visibleProjects: List<ProjectEntity>,
     projectCounts: Map<Int, ProjectCounts>,
+    projectTilesMap: Map<Int, List<BentoEntity>> = emptyMap(),
+    collapsedProjectIds: Set<Int> = emptySet(),
     searchQuery: String,
     isSearchActive: Boolean,
     onSearchQueryChange: (String) -> Unit,
@@ -60,6 +63,8 @@ fun CollectionsScreen(
     onProjectDeleteRequest: (ProjectEntity) -> Unit,
     onProjectEditRequest: (ProjectEntity) -> Unit,
     onToggleLockRequest: ((ProjectEntity) -> Unit)? = null,
+    onToggleExpand: ((projectId: Int, isCollapsed: Boolean) -> Unit)? = null,
+    onTileClick: ((BentoEntity) -> Unit)? = null,
     triggerHaptic: (String) -> Unit,
     bottomBarHeight: Dp,
     listState: androidx.compose.foundation.lazy.LazyListState = androidx.compose.foundation.lazy.rememberLazyListState(),
@@ -121,10 +126,14 @@ fun CollectionsScreen(
                             ProjectCard(
                                 project = project,
                                 counts = projectCounts[project.id],
+                                projectTiles = projectTilesMap[project.id] ?: emptyList(),
+                                isCollapsed = project.id in collapsedProjectIds,
                                 onClick = { onProjectClick(project) },
                                 onDeleteRequest = { onProjectDeleteRequest(project) },
                                 onEditRequest = { onProjectEditRequest(project) },
                                 onToggleLockRequest = if (onToggleLockRequest != null) { { onToggleLockRequest(project) } } else null,
+                                onToggleExpand = if (onToggleExpand != null) { { isCollapsed -> onToggleExpand(project.id, isCollapsed) } } else null,
+                                onTileClick = onTileClick,
                                 onHaptic = { type -> triggerHaptic(type) }
                             )
                         }

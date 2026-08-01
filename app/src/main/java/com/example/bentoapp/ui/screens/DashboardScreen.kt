@@ -47,6 +47,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateMapOf
@@ -71,6 +72,7 @@ import com.example.bentoapp.data.BentoEntity
 import com.example.bentoapp.data.ProjectCounts
 import com.example.bentoapp.ui.components.AddProjectDialog
 import com.example.bentoapp.ui.components.ManageLocksDialog
+import com.example.bentoapp.ui.components.BentoLightbox
 import com.example.bentoapp.ui.components.BentoFab
 import com.example.bentoapp.ui.components.BentoBottomNavigation
 import com.example.bentoapp.utils.PreferenceManager
@@ -237,13 +239,18 @@ fun DashboardScreen(
         }
     }
 
+    val allGalleryImages by viewModel.allGalleryImages.collectAsState()
+    val projectTilesMap = remember(allGalleryImages) {
+        allGalleryImages.groupBy { it.projectId }
+    }
+    val collapsedProjectIds by preferenceManager.collapsedProjectIds.collectAsState(initial = emptySet())
+    var previewLightboxTile by remember { mutableStateOf<BentoEntity?>(null) }
+
     Box(
         modifier = Modifier
             .fillMaxSize()
             .background(MaterialTheme.colorScheme.background)
     ) {
-        // Root container for screen content without Scaffold to avoid redundant top padding.
-        // Screens manage their own insets (e.g., statusBarsPadding()).
         Box(modifier = Modifier.fillMaxSize()) {
             AnimatedContent(
                 targetState = selectedTab,
@@ -269,6 +276,8 @@ fun DashboardScreen(
                         CollectionsScreen(
                             visibleProjects = visibleProjects,
                             projectCounts = projectCounts,
+                            projectTilesMap = projectTilesMap,
+                            collapsedProjectIds = collapsedProjectIds,
                             searchQuery = searchQuery,
                             isSearchActive = isSearchActive,
                             onSearchQueryChange = { searchQuery = it },
@@ -285,6 +294,10 @@ fun DashboardScreen(
                                 }
                             },
                             onToggleLockRequest = onToggleProjectLock,
+                            onToggleExpand = { projId, isCollapsed ->
+                                scope.launch { preferenceManager.setProjectCollapsed(projId, isCollapsed) }
+                            },
+                            onTileClick = { tile -> previewLightboxTile = tile },
                             triggerHaptic = triggerHaptic,
                             bottomBarHeight = trueBottomBarHeight,
                             listState = collectionsListState,
@@ -612,6 +625,20 @@ fun DashboardScreen(
                     }
                 }
             }
+        }
+
+        // ── Preview Reel Lightbox ──
+        previewLightboxTile?.let { tile ->
+            BentoLightbox(
+                titles = listOf(tile.title ?: ""),
+                imagePaths = listOf(tile.imageUri ?: ""),
+                initialIndex = 0,
+                initialStatusBarVisible = true,
+                onUiVisibilityChange = {},
+                onEdit = {},
+                onDelete = {},
+                onDismiss = { previewLightboxTile = null }
+            )
         }
     }
 }
