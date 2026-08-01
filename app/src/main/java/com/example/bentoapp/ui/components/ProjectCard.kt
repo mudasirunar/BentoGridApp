@@ -73,21 +73,27 @@ fun ProjectCard(
 
     val isExpanded = isChevronEnabled && !isCollapsed
 
-    val targetHeight = if (isExpanded) 240.dp else 104.dp
-    val targetRotation = if (isExpanded) 90f else 0f
-
-    val animatedCardHeight by animateDpAsState(
-        targetValue = targetHeight,
+    // ── SINGLE shared animation fraction drives BOTH card height and carousel ──
+    // Using one spring spec guarantees perfect sync — nothing can drift apart.
+    val expandFraction by animateFloatAsState(
+        targetValue = if (isExpanded) 1f else 0f,
         animationSpec = spring(
-            dampingRatio = Spring.DampingRatioLowBouncy,
+            dampingRatio = Spring.DampingRatioNoBouncy,
             stiffness = Spring.StiffnessMediumLow
         ),
-        label = "animatedCardHeight"
+        label = "expandFraction"
     )
 
+    val collapsedHeightPx = 104f
+    val expandedHeightPx = 240f
+    val cardHeightDp = (collapsedHeightPx + (expandedHeightPx - collapsedHeightPx) * expandFraction).dp
+
     val chevronRotation by animateFloatAsState(
-        targetValue = targetRotation,
-        animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy),
+        targetValue = if (isExpanded) 90f else 0f,
+        animationSpec = spring(
+            dampingRatio = Spring.DampingRatioNoBouncy,
+            stiffness = Spring.StiffnessMediumLow
+        ),
         label = "chevronRotation"
     )
 
@@ -111,7 +117,7 @@ fun ProjectCard(
     Box(
         modifier = Modifier
             .fillMaxWidth()
-            .height(animatedCardHeight)
+            .height(cardHeightDp)
     ) {
         // Delete background
         if (progress > 0f) {
@@ -383,70 +389,64 @@ fun ProjectCard(
                 }
 
                 // Expanded Quick Image Preview Reel Carousel
-                AnimatedVisibility(
-                    visible = isExpanded && isChevronEnabled,
-                    enter = fadeIn(tween(280)) + expandVertically(
-                        animationSpec = spring(dampingRatio = Spring.DampingRatioLowBouncy, stiffness = Spring.StiffnessMediumLow),
-                        expandFrom = Alignment.Top
-                    ),
-                    exit = fadeOut(tween(200)) + shrinkVertically(
-                        animationSpec = spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = Spring.StiffnessMediumLow),
-                        shrinkTowards = Alignment.Top
-                    )
+                // Driven entirely by expandFraction — same spring as card height = perfect sync
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(132.dp)
+                        .padding(bottom = 8.dp)
+                        .graphicsLayer {
+                            alpha = expandFraction
+                            scaleY = 0.7f + 0.3f * expandFraction
+                            transformOrigin = androidx.compose.ui.graphics.TransformOrigin(0.5f, 0f)
+                        }
                 ) {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(132.dp)
-                            .padding(bottom = 8.dp)
+                    LazyRow(
+                        modifier = Modifier.fillMaxSize(),
+                        contentPadding = PaddingValues(horizontal = 16.dp),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        LazyRow(
-                            modifier = Modifier.fillMaxSize(),
-                            contentPadding = PaddingValues(horizontal = 16.dp),
-                            horizontalArrangement = Arrangement.spacedBy(10.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            items(imageTiles, key = { it.id }) { tile ->
-                                val aspectRatio = remember(tile.imageUri) {
-                                    if (!tile.imageUri.isNullOrEmpty()) {
-                                        val options = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-                                        BitmapFactory.decodeFile(tile.imageUri, options)
-                                        if (options.outHeight > 0 && options.outWidth > 0) {
-                                            (options.outWidth.toFloat() / options.outHeight.toFloat()).coerceIn(0.5f, 2.5f)
-                                        } else 1f
+                        items(imageTiles, key = { it.id }) { tile ->
+                            val aspectRatio = remember(tile.imageUri) {
+                                if (!tile.imageUri.isNullOrEmpty()) {
+                                    val options = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+                                    BitmapFactory.decodeFile(tile.imageUri, options)
+                                    if (options.outHeight > 0 && options.outWidth > 0) {
+                                        (options.outWidth.toFloat() / options.outHeight.toFloat()).coerceIn(0.5f, 2.5f)
                                     } else 1f
-                                }
+                                } else 1f
+                            }
 
-                                val context = LocalContext.current
-                                val imageRequest = remember(tile.imageUri) {
-                                    ImageRequest.Builder(context)
-                                        .data(tile.imageUri?.let { File(it) })
-                                        .diskCachePolicy(CachePolicy.ENABLED)
-                                        .memoryCachePolicy(CachePolicy.ENABLED)
-                                        .size(Size.ORIGINAL)
-                                        .allowHardware(true)
-                                        .crossfade(false)
-                                        .build()
-                                }
-                                Surface(
-                                    shape = RoundedCornerShape(16.dp),
-                                    color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.25f),
-                                    modifier = Modifier
-                                        .height(118.dp)
-                                        .aspectRatio(aspectRatio, matchHeightConstraintsFirst = true)
-                                        .clip(RoundedCornerShape(16.dp))
-                                        .clickable {
-                                            onHaptic("TICK")
-                                            onTileClick?.invoke(tile, imageTiles)
-                                        }
-                                ) {
-                                    AsyncImage(
-                                        model = imageRequest,
-                                        contentDescription = null,
-                                        modifier = Modifier.fillMaxSize(),
-                                        contentScale = ContentScale.Crop
-                                    )
-                                }
+                            val context = LocalContext.current
+                            val imageRequest = remember(tile.imageUri) {
+                                ImageRequest.Builder(context)
+                                    .data(tile.imageUri?.let { File(it) })
+                                    .diskCachePolicy(CachePolicy.ENABLED)
+                                    .memoryCachePolicy(CachePolicy.ENABLED)
+                                    .size(Size.ORIGINAL)
+                                    .allowHardware(true)
+                                    .crossfade(false)
+                                    .build()
+                            }
+                            Surface(
+                                shape = RoundedCornerShape(16.dp),
+                                color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.25f),
+                                modifier = Modifier
+                                    .height(118.dp)
+                                    .aspectRatio(aspectRatio, matchHeightConstraintsFirst = true)
+                                    .clip(RoundedCornerShape(16.dp))
+                                    .clickable {
+                                        onHaptic("TICK")
+                                        onTileClick?.invoke(tile, imageTiles)
+                                    }
+                            ) {
+                                AsyncImage(
+                                    model = imageRequest,
+                                    contentDescription = null,
+                                    modifier = Modifier.fillMaxSize(),
+                                    contentScale = ContentScale.Crop
+                                )
                             }
                         }
                     }
