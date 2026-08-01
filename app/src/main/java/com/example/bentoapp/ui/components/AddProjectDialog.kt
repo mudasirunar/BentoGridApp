@@ -44,18 +44,21 @@ import java.io.File
 @Composable
 fun AddProjectDialog(
     onDismiss: () -> Unit,
-    onConfirm: (name: String, imageUri: String, isBackground: Boolean, shapeIndex: Int) -> Unit,
+    onConfirm: (name: String, imageUri: String, isBackground: Boolean, shapeIndex: Int, isLocked: Boolean) -> Unit,
     triggerHaptic: (String) -> Unit,
     existingName: String = "",
     existingImageUri: String = "",
     existingIsBackground: Boolean = false,
     existingShapeIndex: Int = 1,
-    isEditMode: Boolean = false
+    existingIsLocked: Boolean = false,
+    isEditMode: Boolean = false,
+    onRequireBiometricAuth: ((title: String, subtitle: String, onSuccess: () -> Unit) -> Unit)? = null
 ) {
     var projectName by rememberSaveable { mutableStateOf(existingName) }
     var selectedImageUri by rememberSaveable { mutableStateOf(existingImageUri) }
     var setAsBackground by rememberSaveable { mutableStateOf(existingIsBackground) }
     var selectedShapeIndex by rememberSaveable { mutableStateOf(existingShapeIndex) }
+    var isLocked by rememberSaveable { mutableStateOf(existingIsLocked) }
     val isNameValid = projectName.isNotBlank()
     val screenHeight = LocalConfiguration.current.screenHeightDp.dp
     val scrollState = rememberScrollState()
@@ -424,6 +427,40 @@ fun AddProjectDialog(
                         }
                     }
 
+                    Spacer(Modifier.height(12.dp))
+
+                    // Lock Collection Toggle
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(12.dp))
+                            .clickable {
+                                triggerHaptic("TICK")
+                                isLocked = !isLocked
+                            }
+                            .padding(vertical = 8.dp, horizontal = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Checkbox(
+                            checked = isLocked,
+                            onCheckedChange = {
+                                triggerHaptic("TICK")
+                                isLocked = it
+                            },
+                            colors = CheckboxDefaults.colors(
+                                checkedColor = Color(0xFF7C3AED),
+                                uncheckedColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.3f)
+                            )
+                        )
+                        Text(
+                            text = "Lock collection",
+                            style = MaterialTheme.typography.bodyMedium,
+                            fontWeight = FontWeight.Medium,
+                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.85f)
+                        )
+                    }
+
                     Spacer(Modifier.height(24.dp))
 
                     // --- Dynamic Create / Save Button ---
@@ -452,8 +489,19 @@ fun AddProjectDialog(
                             )
                             .clickable(enabled = isNameValid) {
                                 triggerHaptic("CONFIRM")
-                                buttonPressed = true
-                                onConfirm(projectName, selectedImageUri, setAsBackground, selectedShapeIndex)
+                                val isLockToggled = isLocked != existingIsLocked || (isLocked && !isEditMode)
+                                if (isLockToggled && onRequireBiometricAuth != null) {
+                                    onRequireBiometricAuth(
+                                        if (isLocked) "Lock Collection" else "Unlock Collection",
+                                        "Confirm identity to save collection lock status"
+                                    ) {
+                                        buttonPressed = true
+                                        onConfirm(projectName, selectedImageUri, setAsBackground, selectedShapeIndex, isLocked)
+                                    }
+                                } else {
+                                    buttonPressed = true
+                                    onConfirm(projectName, selectedImageUri, setAsBackground, selectedShapeIndex, isLocked)
+                                }
                             },
                         contentAlignment = Alignment.Center
                     ) {

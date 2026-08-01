@@ -13,6 +13,7 @@ data class ProjectEntity(
     val imageUrl: String = "",
     val isBackground: Boolean = false,
     val shapeIndex: Int = 1,
+    val isLocked: Boolean = false,
     val createdAt: Long = System.currentTimeMillis()
 )
 

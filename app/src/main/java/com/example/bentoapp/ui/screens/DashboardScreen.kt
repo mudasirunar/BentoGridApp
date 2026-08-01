@@ -70,6 +70,7 @@ import com.example.bentoapp.data.ProjectEntity
 import com.example.bentoapp.data.BentoEntity
 import com.example.bentoapp.data.ProjectCounts
 import com.example.bentoapp.ui.components.AddProjectDialog
+import com.example.bentoapp.ui.components.ManageLocksDialog
 import com.example.bentoapp.ui.components.BentoFab
 import com.example.bentoapp.ui.components.BentoBottomNavigation
 import com.example.bentoapp.utils.PreferenceManager
@@ -84,11 +85,20 @@ fun DashboardScreen(
     preferenceManager: PreferenceManager,
     currentThemeMode: com.example.bentoapp.utils.ThemeMode,
     onProjectClick: (ProjectEntity) -> Unit,
-    onProjectCreated: suspend (String, String, Boolean, Int) -> ProjectEntity,
+    onProjectCreated: suspend (String, String, Boolean, Int, Boolean) -> ProjectEntity,
     onProjectDeletedImmediate: (ProjectEntity, (List<BentoEntity>) -> Unit) -> Unit,
     onUndoProjectDelete: (ProjectEntity, List<BentoEntity>) -> Unit,
     onProjectDeleteConfirm: (ProjectEntity, List<BentoEntity>) -> Unit,
-    onProjectUpdated: (ProjectEntity, String, Boolean, Int) -> Unit
+    onProjectUpdated: (ProjectEntity, String, Boolean, Int, Boolean) -> Unit,
+    onToggleProjectLock: ((ProjectEntity) -> Unit)? = null,
+    isBiometricLockEnabled: Boolean = false,
+    onBiometricLockToggle: (Boolean) -> Unit = {},
+    onRequireBiometricAuth: ((String, String, () -> Unit) -> Unit)? = null,
+    onOpenManageLocksDialog: () -> Unit = {},
+    onUnlockAllCollections: () -> Unit = {},
+    showManageLocksDialog: Boolean = false,
+    onDismissManageLocksDialog: () -> Unit = {},
+    onConfirmBatchLocks: (Set<Int>) -> Unit = {}
 ) {
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
@@ -265,7 +275,16 @@ fun DashboardScreen(
                             onSearchActiveChange = { isSearchActive = it },
                             onProjectClick = onProjectClick,
                             onProjectDeleteRequest = { projectToDelete = it },
-                            onProjectEditRequest = { projectToEdit = it },
+                            onProjectEditRequest = { project ->
+                                if (project.isLocked && onRequireBiometricAuth != null) {
+                                    onRequireBiometricAuth("Unlock ${project.name}", "Authenticate fingerprint to edit collection") {
+                                        projectToEdit = project
+                                    }
+                                } else {
+                                    projectToEdit = project
+                                }
+                            },
+                            onToggleLockRequest = onToggleProjectLock,
                             triggerHaptic = triggerHaptic,
                             bottomBarHeight = trueBottomBarHeight,
                             listState = collectionsListState,
@@ -286,6 +305,9 @@ fun DashboardScreen(
                             onThemeSelected = { mode ->
                                 scope.launch { preferenceManager.setThemeMode(mode) }
                             },
+                            projects = projects,
+                            onOpenManageLocksDialog = onOpenManageLocksDialog,
+                            onUnlockAllCollections = onUnlockAllCollections,
                             bottomPadding = trueBottomBarHeight,
                             scrollState = settingsScrollState,
                             modifier = Modifier.fillMaxSize()
@@ -388,9 +410,10 @@ fun DashboardScreen(
             AddProjectDialog(
                 onDismiss = { showAddDialog = false },
                 triggerHaptic = triggerHaptic,
-                onConfirm = { name, image, isBackground, shapeIndex ->
+                onRequireBiometricAuth = onRequireBiometricAuth,
+                onConfirm = { name, image, isBackground, shapeIndex, isLocked ->
                     scope.launch {
-                        val newProject = onProjectCreated(name, image, isBackground, shapeIndex)
+                        val newProject = onProjectCreated(name, image, isBackground, shapeIndex, isLocked)
                         showAddDialog = false
                         onProjectClick(newProject)
                     }
@@ -404,17 +427,30 @@ fun DashboardScreen(
                 AddProjectDialog(
                     onDismiss = { projectToEdit = null },
                     triggerHaptic = triggerHaptic,
-                    onConfirm = { name, imageUri, isBackground, shapeIndex ->
-                        onProjectUpdated(project.copy(name = name), imageUri, isBackground, shapeIndex)
+                    onRequireBiometricAuth = onRequireBiometricAuth,
+                    onConfirm = { name, imageUri, isBackground, shapeIndex, isLocked ->
+                        onProjectUpdated(project.copy(name = name), imageUri, isBackground, shapeIndex, isLocked)
                         projectToEdit = null
                     },
                     existingName = project.name,
                     existingImageUri = project.imageUrl,
                     existingIsBackground = project.isBackground,
                     existingShapeIndex = project.shapeIndex,
+                    existingIsLocked = project.isLocked,
                     isEditMode = true
                 )
             }
+        }
+
+        // ── Manage Locks Dialog ──
+        if (showManageLocksDialog) {
+            ManageLocksDialog(
+                projects = projects,
+                projectCounts = projectCounts,
+                onDismiss = onDismissManageLocksDialog,
+                onConfirmLocks = onConfirmBatchLocks,
+                triggerHaptic = triggerHaptic
+            )
         }
 
         // ── Delete Confirmation Sheet ──

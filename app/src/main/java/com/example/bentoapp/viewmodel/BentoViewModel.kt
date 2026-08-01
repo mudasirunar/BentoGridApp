@@ -210,7 +210,7 @@ class BentoViewModel(private val dao: BentoDao) : ViewModel() {
     }
 
     // ─── PROJECT CRUD ────────────────────────────────────────────────
-    suspend fun addProject(context: Context, name: String, imageUriString: String, isBackground: Boolean, shapeIndex: Int): ProjectEntity {
+    suspend fun addProject(context: Context, name: String, imageUriString: String, isBackground: Boolean, shapeIndex: Int, isLocked: Boolean = false): ProjectEntity {
         return withContext(Dispatchers.IO) {
             var finalPath = ""
 
@@ -223,7 +223,8 @@ class BentoViewModel(private val dao: BentoDao) : ViewModel() {
                 name = name,
                 imageUrl = finalPath,
                 isBackground = isBackground,
-                shapeIndex = shapeIndex
+                shapeIndex = shapeIndex,
+                isLocked = isLocked
             )
 
             val id = dao.insertProject(newProject)
@@ -231,7 +232,7 @@ class BentoViewModel(private val dao: BentoDao) : ViewModel() {
         }
     }
 
-    fun updateProject(context: Context, project: ProjectEntity, newImageUri: String, isBackground: Boolean, shapeIndex: Int) {
+    fun updateProject(context: Context, project: ProjectEntity, newImageUri: String, isBackground: Boolean, shapeIndex: Int, isLocked: Boolean = project.isLocked) {
         viewModelScope.launch(Dispatchers.IO) {
             var finalPath = project.imageUrl
 
@@ -249,14 +250,22 @@ class BentoViewModel(private val dao: BentoDao) : ViewModel() {
                 }
             }
 
-            // 2. Save updated project with new isBackground state
+            // 2. Save updated project with new isBackground & isLocked state
             dao.updateProject(
                 project.copy(
                     imageUrl = finalPath,
                     isBackground = isBackground,
-                    shapeIndex = shapeIndex
+                    shapeIndex = shapeIndex,
+                    isLocked = isLocked
                 )
             )
+        }
+    }
+
+    fun toggleProjectLock(project: ProjectEntity) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val updated = project.copy(isLocked = !project.isLocked)
+            dao.updateProject(updated)
         }
     }
 

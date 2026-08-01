@@ -29,12 +29,10 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.BrightnessAuto
 import androidx.compose.material.icons.rounded.DarkMode
 import androidx.compose.material.icons.rounded.LightMode
+import androidx.compose.material.icons.rounded.Lock
 import androidx.compose.material.icons.rounded.Palette
 import androidx.compose.material.icons.rounded.Settings
-import androidx.compose.material3.Icon
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
-import androidx.compose.material3.Text
+import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -54,14 +52,22 @@ import com.example.bentoapp.utils.ThemeMode
 import com.example.bentoapp.ui.components.SimpleTopBar
 import kotlinx.coroutines.launch
 
+import androidx.compose.material.icons.filled.ChevronRight
+import com.example.bentoapp.data.ProjectEntity
+
 @Composable
 fun SettingsScreen(
     currentThemeMode: ThemeMode,
     onThemeSelected: (ThemeMode) -> Unit,
+    projects: List<ProjectEntity> = emptyList(),
+    onOpenManageLocksDialog: () -> Unit = {},
+    onUnlockAllCollections: () -> Unit = {},
     bottomPadding: androidx.compose.ui.unit.Dp = 0.dp,
     scrollState: ScrollState = rememberScrollState(),
     modifier: Modifier = Modifier
 ) {
+    val lockedCount = remember(projects) { projects.count { it.isLocked } }
+
     Column(
         modifier = modifier
             .fillMaxSize()
@@ -70,7 +76,7 @@ fun SettingsScreen(
         SimpleTopBar(title = "Settings")
 
         Column(
-            horizontalAlignment = Alignment.Start, // Align to left
+            horizontalAlignment = Alignment.Start,
             modifier = Modifier
                 .padding(horizontal = 24.dp)
                 .verticalScroll(scrollState)
@@ -84,7 +90,185 @@ fun SettingsScreen(
                 onThemeSelected = onThemeSelected
             )
 
+            Spacer(Modifier.height(32.dp))
+
+            // ── Security & Privacy Section ──
+            BiometricSettingsSection(
+                lockedCount = lockedCount,
+                onToggle = { targetOn ->
+                    if (targetOn) {
+                        onOpenManageLocksDialog()
+                    } else {
+                        onUnlockAllCollections()
+                    }
+                },
+                onCardClick = onOpenManageLocksDialog
+            )
+
             Spacer(Modifier.height(48.dp + bottomPadding))
+        }
+    }
+}
+
+@Composable
+private fun BiometricSettingsSection(
+    lockedCount: Int,
+    onToggle: (Boolean) -> Unit,
+    onCardClick: () -> Unit
+) {
+    val isDark = MaterialTheme.colorScheme.surface.luminance() < 0.5f
+    val isEnabled = lockedCount > 0
+
+    val trackColor = if (isDark) {
+        MaterialTheme.colorScheme.onSurface.copy(alpha = 0.12f)
+    } else {
+        MaterialTheme.colorScheme.onSurface.copy(alpha = 0.06f)
+    }
+
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalAlignment = Alignment.Start
+    ) {
+        // Header
+        Column(modifier = Modifier.padding(bottom = 16.dp)) {
+            Text(
+                text = "Security & Privacy",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.ExtraBold,
+                color = MaterialTheme.colorScheme.onSurface,
+                letterSpacing = (-0.5).sp
+            )
+            Text(
+                text = "Protect your collections with biometric security.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.45f)
+            )
+        }
+
+        // Main Toggle Row
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(
+                    color = trackColor,
+                    shape = RoundedCornerShape(22.dp)
+                )
+                .border(
+                    width = 0.5.dp,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f),
+                    shape = RoundedCornerShape(22.dp)
+                )
+                .padding(18.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(46.dp)
+                    .background(
+                        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.12f),
+                        shape = RoundedCornerShape(14.dp)
+                    ),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = Icons.Rounded.Lock,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(24.dp)
+                )
+            }
+
+            Spacer(Modifier.width(16.dp))
+
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = "Biometric Protection",
+                    style = MaterialTheme.typography.bodyLarge,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+                Spacer(Modifier.height(2.dp))
+                Text(
+                    text = if (isEnabled) "$lockedCount ${if (lockedCount == 1) "collection" else "collections"} protected" else "Tap switch to select collections to lock",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f)
+                )
+            }
+
+            Spacer(Modifier.width(12.dp))
+
+            Switch(
+                checked = isEnabled,
+                onCheckedChange = onToggle,
+                colors = SwitchDefaults.colors(
+                    checkedThumbColor = MaterialTheme.colorScheme.onPrimary,
+                    checkedTrackColor = MaterialTheme.colorScheme.primary,
+                    uncheckedThumbColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f),
+                    uncheckedTrackColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.12f),
+                    uncheckedBorderColor = Color.Transparent
+                )
+            )
+        }
+
+        // ── Security Dashboard Summary Card (Shown when >0 collections are locked) ──
+        if (lockedCount > 0) {
+            Spacer(Modifier.height(14.dp))
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(
+                        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.08f),
+                        shape = RoundedCornerShape(20.dp)
+                    )
+                    .border(
+                        width = 0.5.dp,
+                        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.25f),
+                        shape = RoundedCornerShape(20.dp)
+                    )
+                    .clickable { onCardClick() }
+                    .padding(16.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(42.dp)
+                        .background(
+                            color = MaterialTheme.colorScheme.primary,
+                            shape = RoundedCornerShape(12.dp)
+                        ),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.Lock,
+                        contentDescription = null,
+                        tint = Color.White,
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
+
+                Spacer(Modifier.width(14.dp))
+
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = "$lockedCount ${if (lockedCount == 1) "Collection" else "Collections"} Locked",
+                        style = MaterialTheme.typography.bodyLarge,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                    Text(
+                        text = "Tap to manage or lock/unlock collections",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
+                    )
+                }
+
+                Icon(
+                    imageVector = Icons.Default.ChevronRight,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(20.dp)
+                )
+            }
         }
     }
 }

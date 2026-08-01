@@ -23,8 +23,10 @@ exifinterface = "1.4.2"
 animationCore = "1.10.5"
 uiText = "1.10.5"
 datastore = "1.1.1"
+biometric = "1.2.0-alpha05"
 
 [libraries]
+androidx-biometric = { group = "androidx.biometric", name = "biometric-ktx", version.ref = "biometric" }
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
 junit = { group = "junit", name = "junit", version.ref = "junit" }
 androidx-junit = { group = "androidx.test.ext", name = "junit", version.ref = "junitVersion" }

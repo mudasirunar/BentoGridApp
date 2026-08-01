@@ -28,12 +28,14 @@ import com.example.bentoapp.ui.screens.AddTileScreen
 import com.example.bentoapp.utils.PreferenceManager
 import com.example.bentoapp.utils.ThemeMode
 
+import androidx.fragment.app.FragmentActivity
+import com.example.bentoapp.utils.BiometricPromptManager
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.launch
 
-class MainActivity : ComponentActivity() {
+class MainActivity : FragmentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         val splashScreen = installSplashScreen()
         super.onCreate(savedInstanceState)
@@ -42,12 +44,21 @@ class MainActivity : ComponentActivity() {
         val db = BentoDatabase.getDatabase(applicationContext)
         val viewModel = BentoViewModel(db.bentoDao())
         val preferenceManager = PreferenceManager(applicationContext)
+        val biometricPromptManager = BiometricPromptManager(this)
 
         // Theme Loading State
         var themeModeState by mutableStateOf<ThemeMode?>(null)
         lifecycleScope.launch {
             preferenceManager.themeMode.collect { mode ->
                 themeModeState = mode
+            }
+        }
+
+        // Biometric Lock Preference State
+        var isBiometricLockEnabled by mutableStateOf(false)
+        lifecycleScope.launch {
+            preferenceManager.isBiometricLockEnabled.collect { enabled ->
+                isBiometricLockEnabled = enabled
             }
         }
 
@@ -91,17 +102,85 @@ class MainActivity : ComponentActivity() {
 
                     // Level 1: Dashboard
                     composable("main_dashboard") {
+                        val isBiometricLockActive = isBiometricLockEnabled || projects.any { it.isLocked }
+                        var showManageLocksDialog by remember { mutableStateOf(false) }
+
                         DashboardScreen(
                             viewModel = viewModel,
                             projects = projects,
                             projectCounts = projectCounts,
                             preferenceManager = preferenceManager,
                             currentThemeMode = themeMode,
-                            onProjectClick = { project ->
-                                navController.navigate("collection_detail/${project.id}/${project.name}")
+                            isBiometricLockEnabled = isBiometricLockActive,
+                            onOpenManageLocksDialog = {
+                                biometricPromptManager.promptBiometricAuth(
+                                    title = "Manage Collection Locks",
+                                    subtitle = "Confirm identity to access lock manager",
+                                    onSuccess = {
+                                        showManageLocksDialog = true
+                                    }
+                                )
                             },
-                            onProjectCreated = { name, imageUri, isBackground, shapeIndex ->
-                                viewModel.addProject(applicationContext, name, imageUri, isBackground, shapeIndex)
+                            onUnlockAllCollections = {
+                                biometricPromptManager.promptBiometricAuth(
+                                    title = "Unlock All Collections",
+                                    subtitle = "Confirm identity to remove all locks",
+                                    onSuccess = {
+                                        lifecycleScope.launch {
+                                            preferenceManager.setBiometricLockEnabled(false)
+                                            projects.forEach { project ->
+                                                if (project.isLocked) {
+                                                    viewModel.toggleProjectLock(project)
+                                                }
+                                            }
+                                        }
+                                    }
+                                )
+                            },
+                            showManageLocksDialog = showManageLocksDialog,
+                            onDismissManageLocksDialog = { showManageLocksDialog = false },
+                            onConfirmBatchLocks = { targetLockedIds ->
+                                lifecycleScope.launch {
+                                    projects.forEach { p ->
+                                        val shouldBeLocked = p.id in targetLockedIds
+                                        if (p.isLocked != shouldBeLocked) {
+                                            viewModel.toggleProjectLock(p)
+                                        }
+                                    }
+                                    preferenceManager.setBiometricLockEnabled(targetLockedIds.isNotEmpty())
+                                }
+                            },
+                            onProjectClick = { project ->
+                                if (project.isLocked) {
+                                    biometricPromptManager.promptBiometricAuth(
+                                        title = "Unlock ${project.name}",
+                                        subtitle = "Authenticate fingerprint to open collection",
+                                        onSuccess = {
+                                            navController.navigate("collection_detail/${project.id}/${project.name}")
+                                        }
+                                    )
+                                } else {
+                                    navController.navigate("collection_detail/${project.id}/${project.name}")
+                                }
+                            },
+                            onToggleProjectLock = { project ->
+                                biometricPromptManager.promptBiometricAuth(
+                                    title = if (project.isLocked) "Unlock ${project.name}" else "Lock ${project.name}",
+                                    subtitle = "Confirm identity to change lock status",
+                                    onSuccess = {
+                                        viewModel.toggleProjectLock(project)
+                                    }
+                                )
+                            },
+                            onRequireBiometricAuth = { title, subtitle, onSuccess ->
+                                biometricPromptManager.promptBiometricAuth(
+                                    title = title,
+                                    subtitle = subtitle,
+                                    onSuccess = onSuccess
+                                )
+                            },
+                            onProjectCreated = { name, imageUri, isBackground, shapeIndex, isLocked ->
+                                viewModel.addProject(applicationContext, name, imageUri, isBackground, shapeIndex, isLocked)
                             },
                             onProjectDeletedImmediate = { project, onFetched ->
                                 viewModel.deleteProjectDbOnly(project, onFetched)
@@ -112,8 +191,8 @@ class MainActivity : ComponentActivity() {
                             onProjectDeleteConfirm = { project, tiles ->
                                 viewModel.deleteProjectImagesOnly(project, tiles)
                             },
-                            onProjectUpdated = { project, newUri, isBackground, shapeIndex ->
-                                viewModel.updateProject(applicationContext, project, newUri, isBackground, shapeIndex)
+                            onProjectUpdated = { project, newUri, isBackground, shapeIndex, isLocked ->
+                                viewModel.updateProject(applicationContext, project, newUri, isBackground, shapeIndex, isLocked)
                             }
                         )
                     }

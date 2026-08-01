@@ -59,6 +59,7 @@ fun CollectionsScreen(
     onProjectClick: (ProjectEntity) -> Unit,
     onProjectDeleteRequest: (ProjectEntity) -> Unit,
     onProjectEditRequest: (ProjectEntity) -> Unit,
+    onToggleLockRequest: ((ProjectEntity) -> Unit)? = null,
     triggerHaptic: (String) -> Unit,
     bottomBarHeight: Dp,
     listState: androidx.compose.foundation.lazy.LazyListState = androidx.compose.foundation.lazy.rememberLazyListState(),
@@ -123,6 +124,7 @@ fun CollectionsScreen(
                                 onClick = { onProjectClick(project) },
                                 onDeleteRequest = { onProjectDeleteRequest(project) },
                                 onEditRequest = { onProjectEditRequest(project) },
+                                onToggleLockRequest = if (onToggleLockRequest != null) { { onToggleLockRequest(project) } } else null,
                                 onHaptic = { type -> triggerHaptic(type) }
                             )
                         }
