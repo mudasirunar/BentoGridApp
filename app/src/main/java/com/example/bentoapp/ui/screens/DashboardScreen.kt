@@ -247,7 +247,7 @@ fun DashboardScreen(
     val projectTilesMap = remember(allGalleryImages) {
         allGalleryImages.groupBy { it.projectId }
     }
-    val collapsedProjectIds by preferenceManager.collapsedProjectIds.collectAsState(initial = emptySet())
+    val collapsedProjectIds by viewModel.collapsedProjectIds.collectAsState()
     var previewLightboxState by remember { mutableStateOf<Pair<BentoEntity, List<BentoEntity>>?>(null) }
 
     Box(
@@ -300,7 +300,7 @@ fun DashboardScreen(
                             },
                             onToggleLockRequest = onToggleProjectLock,
                             onToggleExpand = { projId, isCollapsed ->
-                                scope.launch { preferenceManager.setProjectCollapsed(projId, isCollapsed) }
+                                viewModel.toggleProjectCollapsed(projId, isCollapsed)
                             },
                             onTileClick = { tile, collectionTiles ->
                                 previewLightboxState = Pair(tile, collectionTiles)

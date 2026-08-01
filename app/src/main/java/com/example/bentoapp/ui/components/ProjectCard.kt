@@ -1,5 +1,6 @@
 package com.example.bentoapp.ui.components
 
+import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -16,7 +17,6 @@ import androidx.compose.material.icons.rounded.Lock
 import androidx.compose.material.icons.rounded.LockOpen
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
-import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.blur
@@ -69,20 +69,13 @@ fun ProjectCard(
     val hasImages = imageTiles.isNotEmpty() || (counts?.images ?: 0) > 0
     val isChevronEnabled = !project.isLocked && hasImages
 
-    var isExpanded by remember(project.id, isChevronEnabled, isCollapsed) {
-        mutableStateOf(isChevronEnabled && !isCollapsed)
-    }
+    val isExpanded = isChevronEnabled && !isCollapsed
 
-    LaunchedEffect(isChevronEnabled, isCollapsed) {
-        if (!isChevronEnabled) {
-            isExpanded = false
-        } else {
-            isExpanded = !isCollapsed
-        }
-    }
+    val targetHeight = if (isExpanded) 240.dp else 104.dp
+    val targetRotation = if (isExpanded) 90f else 0f
 
     val animatedCardHeight by animateDpAsState(
-        targetValue = if (isExpanded && isChevronEnabled) 240.dp else 104.dp,
+        targetValue = targetHeight,
         animationSpec = spring(
             dampingRatio = Spring.DampingRatioLowBouncy,
             stiffness = Spring.StiffnessMediumLow
@@ -91,7 +84,7 @@ fun ProjectCard(
     )
 
     val chevronRotation by animateFloatAsState(
-        targetValue = if (isExpanded && isChevronEnabled) 90f else 0f,
+        targetValue = targetRotation,
         animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy),
         label = "chevronRotation"
     )
@@ -366,9 +359,8 @@ fun ProjectCard(
                             )
                             .clickable(enabled = isChevronEnabled) {
                                 onHaptic("TICK")
-                                val newExpanded = !isExpanded
-                                isExpanded = newExpanded
-                                onToggleExpand?.invoke(!newExpanded)
+                                // Toggle: if currently expanded, collapse it (isCollapsed = true)
+                                onToggleExpand?.invoke(isExpanded)
                             },
                         contentAlignment = Alignment.Center
                     ) {
@@ -389,7 +381,17 @@ fun ProjectCard(
                 }
 
                 // Expanded Quick Image Preview Reel Carousel
-                if (isExpanded && isChevronEnabled) {
+                AnimatedVisibility(
+                    visible = isExpanded && isChevronEnabled,
+                    enter = fadeIn(tween(280)) + expandVertically(
+                        animationSpec = spring(dampingRatio = Spring.DampingRatioLowBouncy, stiffness = Spring.StiffnessMediumLow),
+                        expandFrom = Alignment.Top
+                    ),
+                    exit = fadeOut(tween(200)) + shrinkVertically(
+                        animationSpec = spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = Spring.StiffnessMediumLow),
+                        shrinkTowards = Alignment.Top
+                    )
+                ) {
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()

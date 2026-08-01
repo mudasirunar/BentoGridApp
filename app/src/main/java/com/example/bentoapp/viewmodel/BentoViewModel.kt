@@ -20,6 +20,7 @@ import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import com.example.bentoapp.utils.PreferenceManager
 import java.io.File
 import java.io.FileOutputStream
 import java.text.SimpleDateFormat
@@ -110,10 +111,29 @@ fun calculateSequentialBlocks(images: List<BentoEntity>, columns: Int): List<Lay
 }
 
 
-class BentoViewModel(private val dao: BentoDao) : ViewModel() {
+class BentoViewModel(
+    private val dao: BentoDao,
+    private val preferenceManager: PreferenceManager? = null
+) : ViewModel() {
 
     private val _isLoading = MutableStateFlow(true)
     val isLoading = _isLoading.asStateFlow()
+
+    val collapsedProjectIds: StateFlow<Set<Int>> = preferenceManager?.collapsedProjectIds
+        ?.flowOn(Dispatchers.IO)
+        ?.stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.Eagerly,
+            initialValue = emptySet()
+        ) ?: MutableStateFlow(emptySet())
+
+    fun toggleProjectCollapsed(projectId: Int, isCollapsed: Boolean) {
+        if (preferenceManager != null) {
+            viewModelScope.launch(Dispatchers.IO) {
+                preferenceManager.setProjectCollapsed(projectId, isCollapsed)
+            }
+        }
+    }
 
     val allProjects: StateFlow<List<ProjectEntity>> = dao.getAllProjects()
         .onEach { _isLoading.value = false }

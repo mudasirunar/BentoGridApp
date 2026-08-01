@@ -42,8 +42,8 @@ class MainActivity : FragmentActivity() {
         enableEdgeToEdge()
 
         val db = BentoDatabase.getDatabase(applicationContext)
-        val viewModel = BentoViewModel(db.bentoDao())
         val preferenceManager = PreferenceManager(applicationContext)
+        val viewModel = BentoViewModel(db.bentoDao(), preferenceManager)
         val biometricPromptManager = BiometricPromptManager(this)
 
         // Theme Loading State
