@@ -26,6 +26,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
@@ -47,6 +48,8 @@ import com.example.bentoapp.data.BentoEntity
 import com.example.bentoapp.data.ProjectEntity
 import com.example.bentoapp.data.ProjectCounts
 import com.example.bentoapp.ui.components.BentoEmptyAnimation
+import com.example.bentoapp.ui.components.DashboardSkeletonView
+import com.example.bentoapp.ui.components.rememberShimmerBrush
 import com.example.bentoapp.ui.components.ProjectCard
 
 @Composable
@@ -55,6 +58,7 @@ fun CollectionsScreen(
     projectCounts: Map<Int, ProjectCounts>,
     projectTilesMap: Map<Int, List<BentoEntity>> = emptyMap(),
     collapsedProjectIds: Set<Int> = emptySet(),
+    isLoading: Boolean = false,
     searchQuery: String,
     isSearchActive: Boolean,
     onSearchQueryChange: (String) -> Unit,
@@ -84,14 +88,21 @@ fun CollectionsScreen(
     // 1. Back to Box so we get the glassy transparency effect!
     Box(modifier = modifier.fillMaxSize()) {
         AnimatedContent(
-            targetState = if (visibleProjects.isEmpty() && !isSearchActive) "empty"
+            targetState = if (isLoading) "skeleton"
+            else if (visibleProjects.isEmpty() && !isSearchActive) "empty"
             else if (isSearchActive && visibleProjects.isEmpty()) "no_results"
             else "content",
-            transitionSpec = { fadeIn(tween(400)) togetherWith fadeOut(tween(400)) },
+            transitionSpec = { fadeIn(tween(350)) togetherWith fadeOut(tween(350)) },
             label = "collectionsState",
             modifier = Modifier.fillMaxSize()
         ) { state ->
             when (state) {
+                "skeleton" -> DashboardSkeletonView(
+                    topBarHeight = topBarHeight,
+                    bottomBarHeight = bottomBarHeight,
+                    modifier = Modifier.fillMaxSize()
+                )
+
                 "empty" -> EmptyShelfView(
                     modifier = Modifier.fillMaxSize()
                 )
@@ -150,6 +161,7 @@ fun CollectionsScreen(
                     topBarHeight = with(density) { coordinates.size.height.toDp() }
                 },
             isScrolled = isScrolled.value,
+            isLoading = isLoading,
             searchQuery = searchQuery,
             isSearchActive = isSearchActive,
             onSearchQueryChange = onSearchQueryChange,
@@ -162,6 +174,7 @@ fun CollectionsScreen(
 private fun CollectionsTopBar(
     modifier: Modifier = Modifier,
     isScrolled: Boolean,
+    isLoading: Boolean = false,
     searchQuery: String,
     isSearchActive: Boolean,
     onSearchQueryChange: (String) -> Unit,
@@ -251,7 +264,16 @@ private fun CollectionsTopBar(
             .padding(top = 20.dp, bottom = 16.dp)
     ) {
         Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.CenterStart) {
-            if (titleAlpha > 0f) {
+            if (isLoading) {
+                val shimmerBrush = rememberShimmerBrush()
+                Box(
+                    modifier = Modifier
+                        .width(180.dp)
+                        .height(34.dp)
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(shimmerBrush)
+                )
+            } else if (titleAlpha > 0f) {
                 Text(
                     text = "My Collections",
                     style = MaterialTheme.typography.displaySmall,
@@ -337,7 +359,7 @@ private fun CollectionsTopBar(
                 }
             }
 
-            if (!isSearchActive) {
+            if (!isSearchActive && !isLoading) {
                 IconButton(
                     onClick = { onSearchActiveChange(true) },
                     modifier = Modifier

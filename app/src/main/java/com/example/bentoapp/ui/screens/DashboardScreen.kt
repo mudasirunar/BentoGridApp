@@ -2,6 +2,9 @@ package com.example.bentoapp.ui.screens
 
 import android.os.Build
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.spring
@@ -239,6 +242,7 @@ fun DashboardScreen(
         }
     }
 
+    val isLoading by viewModel.isLoading.collectAsState()
     val allGalleryImages by viewModel.allGalleryImages.collectAsState()
     val projectTilesMap = remember(allGalleryImages) {
         allGalleryImages.groupBy { it.projectId }
@@ -278,6 +282,7 @@ fun DashboardScreen(
                             projectCounts = projectCounts,
                             projectTilesMap = projectTilesMap,
                             collapsedProjectIds = collapsedProjectIds,
+                            isLoading = isLoading,
                             searchQuery = searchQuery,
                             isSearchActive = isSearchActive,
                             onSearchQueryChange = { searchQuery = it },
@@ -333,27 +338,28 @@ fun DashboardScreen(
         // ── Floating UI Layer ──
 
         // 0. Dynamic Scrim
-        Box(
-            modifier = Modifier
-                .align(Alignment.BottomCenter)
-                .fillMaxWidth()
-                .height(trueBottomBarHeight)
-                .background(
-                    brush = androidx.compose.ui.graphics.Brush.verticalGradient(
-                        colors = listOf(
-                            Color.Transparent,
-                            MaterialTheme.colorScheme.background.copy(alpha = 0.4f),
-                            MaterialTheme.colorScheme.background.copy(alpha = 0.85f)
+        if (!isLoading) {
+            Box(
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .fillMaxWidth()
+                    .height(trueBottomBarHeight)
+                    .background(
+                        brush = androidx.compose.ui.graphics.Brush.verticalGradient(
+                            colors = listOf(
+                                Color.Transparent,
+                                MaterialTheme.colorScheme.background.copy(alpha = 0.4f),
+                                MaterialTheme.colorScheme.background.copy(alpha = 0.85f)
+                            )
                         )
                     )
-                )
-        )
+            )
+        }
 
         // 1. FAB
         Box(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
-                // This explicitly locks the FAB right above the Bottom Nav, regardless of phone size.
                 .padding(bottom = trueBottomBarHeight + gapBetweenNavAndFab)
         ) {
             BentoFab(
@@ -361,36 +367,42 @@ fun DashboardScreen(
                     triggerHaptic("CONFIRM")
                     showAddDialog = true
                 },
-                visible = fabVisible && selectedTab == "collections"
+                visible = fabVisible && selectedTab == "collections" && !isLoading
             )
         }
 
         // 2. Bottom Nav
-        Box(
-            modifier = Modifier
-                .align(Alignment.BottomCenter)
-                .zIndex(15f)
-                .navigationBarsPadding() // Safely pushes it above the system chin
-                .padding(bottom = 16.dp, start = 24.dp, end = 24.dp),
-            contentAlignment = Alignment.Center
+        AnimatedVisibility(
+            visible = !isLoading,
+            enter = fadeIn(tween(350)) + slideInVertically { it },
+            exit = fadeOut(tween(350)) + slideOutVertically { it },
+            modifier = Modifier.align(Alignment.BottomCenter)
         ) {
-            BentoBottomNavigation(
-                selectedTab = selectedTab,
-                onTabSelected = { tab ->
-                    triggerHaptic("TICK")
-                    if (selectedTab == tab) {
-                        scope.launch {
-                            when (tab) {
-                                "collections" -> collectionsListState.animateScrollToItem(0)
-                                "gallery" -> galleryListState.animateScrollToItem(0)
-                                "settings" -> settingsScrollState.animateScrollTo(0)
+            Box(
+                modifier = Modifier
+                    .zIndex(15f)
+                    .navigationBarsPadding()
+                    .padding(bottom = 16.dp, start = 24.dp, end = 24.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                BentoBottomNavigation(
+                    selectedTab = selectedTab,
+                    onTabSelected = { tab ->
+                        triggerHaptic("TICK")
+                        if (selectedTab == tab) {
+                            scope.launch {
+                                when (tab) {
+                                    "collections" -> collectionsListState.animateScrollToItem(0)
+                                    "gallery" -> galleryListState.animateScrollToItem(0)
+                                    "settings" -> settingsScrollState.animateScrollTo(0)
+                                }
                             }
+                        } else {
+                            selectedTab = tab
                         }
-                    } else {
-                        selectedTab = tab
                     }
-                }
-            )
+                )
+            }
         }
 
         // ── Snackbar ──

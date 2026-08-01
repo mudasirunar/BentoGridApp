@@ -68,9 +68,8 @@ class MainActivity : FragmentActivity() {
         splashScreen.setKeepOnScreenCondition {
             val elapsed = System.currentTimeMillis() - splashShownAt
             val animationDone = elapsed >= minSplashDuration
-            val loadingDone = !viewModel.isLoading.value
             val themeDone = themeModeState != null
-            !(animationDone && loadingDone && themeDone)
+            !(animationDone && themeDone)
         }
 
         setContent {
