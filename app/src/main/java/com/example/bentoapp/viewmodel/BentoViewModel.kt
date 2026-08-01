@@ -15,6 +15,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
@@ -132,7 +133,13 @@ class BentoViewModel(private val dao: BentoDao) : ViewModel() {
             initialValue = emptyMap()
         )
 
-    val allGalleryImages: StateFlow<List<BentoEntity>> = dao.getAllGalleryImages()
+    val allGalleryImages: StateFlow<List<BentoEntity>> = combine(
+        dao.getAllGalleryImages(),
+        dao.getAllProjects()
+    ) { images, projects ->
+        val lockedProjectIds = projects.filter { it.isLocked }.map { it.id }.toSet()
+        images.filter { it.projectId !in lockedProjectIds }
+    }
         .flowOn(Dispatchers.IO)
         .stateIn(
             scope = viewModelScope,
