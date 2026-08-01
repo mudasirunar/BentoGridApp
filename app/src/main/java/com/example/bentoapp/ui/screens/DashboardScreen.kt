@@ -248,7 +248,7 @@ fun DashboardScreen(
         allGalleryImages.groupBy { it.projectId }
     }
     val collapsedProjectIds by preferenceManager.collapsedProjectIds.collectAsState(initial = emptySet())
-    var previewLightboxTile by remember { mutableStateOf<BentoEntity?>(null) }
+    var previewLightboxState by remember { mutableStateOf<Pair<BentoEntity, List<BentoEntity>>?>(null) }
 
     Box(
         modifier = Modifier
@@ -302,7 +302,9 @@ fun DashboardScreen(
                             onToggleExpand = { projId, isCollapsed ->
                                 scope.launch { preferenceManager.setProjectCollapsed(projId, isCollapsed) }
                             },
-                            onTileClick = { tile -> previewLightboxTile = tile },
+                            onTileClick = { tile, collectionTiles ->
+                                previewLightboxState = Pair(tile, collectionTiles)
+                            },
                             triggerHaptic = triggerHaptic,
                             bottomBarHeight = trueBottomBarHeight,
                             listState = collectionsListState,
@@ -640,16 +642,17 @@ fun DashboardScreen(
         }
 
         // ── Preview Reel Lightbox ──
-        previewLightboxTile?.let { tile ->
+        previewLightboxState?.let { (clickedTile, collectionTiles) ->
+            val initialIndex = collectionTiles.indexOfFirst { it.id == clickedTile.id }.coerceAtLeast(0)
             BentoLightbox(
-                titles = listOf(tile.title ?: ""),
-                imagePaths = listOf(tile.imageUri ?: ""),
-                initialIndex = 0,
+                titles = collectionTiles.map { it.title ?: "" },
+                imagePaths = collectionTiles.map { it.imageUri ?: "" },
+                initialIndex = initialIndex,
                 initialStatusBarVisible = true,
                 onUiVisibilityChange = {},
                 onEdit = {},
                 onDelete = {},
-                onDismiss = { previewLightboxTile = null }
+                onDismiss = { previewLightboxState = null }
             )
         }
     }

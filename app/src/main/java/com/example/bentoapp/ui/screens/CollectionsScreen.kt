@@ -68,7 +68,7 @@ fun CollectionsScreen(
     onProjectEditRequest: (ProjectEntity) -> Unit,
     onToggleLockRequest: ((ProjectEntity) -> Unit)? = null,
     onToggleExpand: ((projectId: Int, isCollapsed: Boolean) -> Unit)? = null,
-    onTileClick: ((BentoEntity) -> Unit)? = null,
+    onTileClick: ((tile: BentoEntity, collectionTiles: List<BentoEntity>) -> Unit)? = null,
     triggerHaptic: (String) -> Unit,
     bottomBarHeight: Dp,
     listState: androidx.compose.foundation.lazy.LazyListState = androidx.compose.foundation.lazy.rememberLazyListState(),
@@ -84,6 +84,20 @@ fun CollectionsScreen(
     // Dynamic variable to hold the Top Bar's exact height
     val density = LocalDensity.current
     var topBarHeight by remember { mutableStateOf(110.dp) } // 110dp fallback
+
+    var previousProjectsSize by remember { mutableIntStateOf(visibleProjects.size) }
+
+    LaunchedEffect(visibleProjects.size) {
+        if (visibleProjects.size > previousProjectsSize) {
+            // When a new project is prepended at index 0, Compose automatically shifts 
+            // firstVisibleItemIndex from 0 to 1 to anchor the old item.
+            // Therefore firstVisibleItemIndex <= 1 indicates the user was at top!
+            if (listState.firstVisibleItemIndex <= 1) {
+                listState.scrollToItem(0)
+            }
+        }
+        previousProjectsSize = visibleProjects.size
+    }
 
     // 1. Back to Box so we get the glassy transparency effect!
     Box(modifier = modifier.fillMaxSize()) {
@@ -240,6 +254,13 @@ private fun CollectionsTopBar(
         }
     }
 
+    val rawStatusBarHeight = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
+    var stableStatusBarHeight by remember { mutableStateOf(0.dp) }
+    if (rawStatusBarHeight > 0.dp && stableStatusBarHeight == 0.dp) {
+        stableStatusBarHeight = rawStatusBarHeight
+    }
+    val finalStatusBarPadding = if (stableStatusBarHeight > 0.dp) stableStatusBarHeight else rawStatusBarHeight
+
     Box(
         modifier = modifier
             .fillMaxWidth()
@@ -259,7 +280,7 @@ private fun CollectionsTopBar(
                 indication = null,
                 onClick = { /* Consume */ }
             )
-            .statusBarsPadding()
+            .padding(top = finalStatusBarPadding)
             .padding(horizontal = 24.dp)
             .padding(top = 20.dp, bottom = 16.dp)
     ) {

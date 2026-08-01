@@ -53,7 +53,7 @@ fun ProjectCard(
     onEditRequest: () -> Unit,
     onToggleLockRequest: (() -> Unit)? = null,
     onToggleExpand: ((Boolean) -> Unit)? = null,
-    onTileClick: ((BentoEntity) -> Unit)? = null,
+    onTileClick: ((tile: BentoEntity, collectionTiles: List<BentoEntity>) -> Unit)? = null,
     onHaptic: (type: String) -> Unit
 ) {
     var dragOffset by remember { mutableFloatStateOf(0f) }
@@ -162,28 +162,6 @@ fun ProjectCard(
                     ),
                     shape = RoundedCornerShape(28.dp)
                 )
-                .pointerInput(Unit) {
-                    detectHorizontalDragGestures(
-                        onDragEnd = {
-                            if (dragOffset < triggerThreshold) onDeleteRequest()
-                            dragOffset = 0f
-                            hasVibrated = false
-                        },
-                        onDragCancel = {
-                            dragOffset = 0f
-                            hasVibrated = false
-                        },
-                        onHorizontalDrag = { _, delta ->
-                            dragOffset = (dragOffset + delta).coerceIn(maxDrag, 0f)
-                            if (dragOffset <= triggerThreshold && !hasVibrated) {
-                                onHaptic("TRIGGER")
-                                hasVibrated = true
-                            } else if (dragOffset > triggerThreshold) {
-                                hasVibrated = false
-                            }
-                        }
-                    )
-                }
         ) {
             Column(modifier = Modifier.fillMaxSize()) {
                 // Top Header Row
@@ -191,6 +169,28 @@ fun ProjectCard(
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(104.dp)
+                        .pointerInput(Unit) {
+                            detectHorizontalDragGestures(
+                                onDragEnd = {
+                                    if (dragOffset < triggerThreshold) onDeleteRequest()
+                                    dragOffset = 0f
+                                    hasVibrated = false
+                                },
+                                onDragCancel = {
+                                    dragOffset = 0f
+                                    hasVibrated = false
+                                },
+                                onHorizontalDrag = { _, delta ->
+                                    dragOffset = (dragOffset + delta).coerceIn(maxDrag, 0f)
+                                    if (dragOffset <= triggerThreshold && !hasVibrated) {
+                                        onHaptic("TRIGGER")
+                                        hasVibrated = true
+                                    } else if (dragOffset > triggerThreshold) {
+                                        hasVibrated = false
+                                    }
+                                }
+                            )
+                        }
                         .combinedClickable(
                             onClick = {
                                 if (!isLongPress) {
@@ -422,7 +422,7 @@ fun ProjectCard(
                                         .clip(RoundedCornerShape(16.dp))
                                         .clickable {
                                             onHaptic("TICK")
-                                            onTileClick?.invoke(tile)
+                                            onTileClick?.invoke(tile, imageTiles)
                                         }
                                 ) {
                                     AsyncImage(
