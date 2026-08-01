@@ -110,6 +110,7 @@ class MainActivity : FragmentActivity() {
                             projectCounts = projectCounts,
                             preferenceManager = preferenceManager,
                             currentThemeMode = themeMode,
+                            navController = navController,
                             isBiometricLockEnabled = isBiometricLockActive,
                             onOpenManageLocksDialog = {
                                 biometricPromptManager.promptBiometricAuth(
@@ -192,6 +193,19 @@ class MainActivity : FragmentActivity() {
                             },
                             onProjectUpdated = { project, newUri, isBackground, shapeIndex, isLocked ->
                                 viewModel.updateProject(applicationContext, project, newUri, isBackground, shapeIndex, isLocked)
+                            },
+                            onDeleteTileImmediate = { tile ->
+                                viewModel.deleteTileDbOnly(tile)
+                            },
+                            onUndoDeleteTile = { tile ->
+                                viewModel.insertTileDirect(tile)
+                            },
+                            onDeleteTileConfirm = { tile ->
+                                viewModel.deleteTileImageOnly(tile)
+                            },
+                            onEditTileClick = { projectId, tileId ->
+                                val project = projects.find { it.id == projectId }
+                                navController.navigate("add_tile/$projectId/${project?.shapeIndex ?: 1}?tileId=$tileId")
                             }
                         )
                     }

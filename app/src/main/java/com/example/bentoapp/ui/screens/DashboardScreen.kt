@@ -89,12 +89,17 @@ fun DashboardScreen(
     projectCounts: Map<Int, ProjectCounts>,
     preferenceManager: PreferenceManager,
     currentThemeMode: com.example.bentoapp.utils.ThemeMode,
+    navController: androidx.navigation.NavController,
     onProjectClick: (ProjectEntity) -> Unit,
     onProjectCreated: suspend (String, String, Boolean, Int, Boolean) -> ProjectEntity,
     onProjectDeletedImmediate: (ProjectEntity, (List<BentoEntity>) -> Unit) -> Unit,
     onUndoProjectDelete: (ProjectEntity, List<BentoEntity>) -> Unit,
     onProjectDeleteConfirm: (ProjectEntity, List<BentoEntity>) -> Unit,
     onProjectUpdated: (ProjectEntity, String, Boolean, Int, Boolean) -> Unit,
+    onDeleteTileImmediate: (BentoEntity) -> Unit = {},
+    onUndoDeleteTile: (BentoEntity) -> Unit = {},
+    onDeleteTileConfirm: (BentoEntity) -> Unit = {},
+    onEditTileClick: (projectId: Int, tileId: Int) -> Unit = { _, _ -> },
     onToggleProjectLock: ((ProjectEntity) -> Unit)? = null,
     isBiometricLockEnabled: Boolean = false,
     onBiometricLockToggle: (Boolean) -> Unit = {},
@@ -136,6 +141,17 @@ fun DashboardScreen(
     val cachedProjectTiles = remember { mutableStateMapOf<Int, List<BentoEntity>>() }
     var activeDeletionJob by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
 
+    // ── Tile deletion state (for lightbox preview delete/undo) ──
+    val pendingTileDeletions = remember { mutableStateMapOf<Int, BentoEntity>() }
+    var activeTileDeletionJob by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
+    var reopenViewerForTileId by rememberSaveable { mutableStateOf<Int?>(null) }
+    var reopenViewerFallbackIndex by rememberSaveable { mutableStateOf<Int?>(null) }
+    var editedFromViewer by rememberSaveable { mutableStateOf(false) }
+    var isViewerUiActive by remember { mutableStateOf(false) }
+
+    // Declared early so snackbarBottomPadding can reference it
+    var previewLightboxState by remember { mutableStateOf<Pair<BentoEntity, List<BentoEntity>>?>(null) }
+
     // ── List & FAB State ──
     val collectionsListState = androidx.compose.foundation.lazy.rememberLazyListState()
     val galleryListState = androidx.compose.foundation.lazy.rememberLazyListState()
@@ -171,10 +187,13 @@ fun DashboardScreen(
     val gapBetweenNavAndFab = 6.dp
 
     val snackbarBottomPadding by animateDpAsState(
-        targetValue = if (fabVisible && selectedTab == "collections") {
-            trueBottomBarHeight + gapBetweenNavAndFab + exactFabHeight + 16.dp
-        } else {
-            trueBottomBarHeight + 16.dp
+        targetValue = when {
+            // Viewer is open — snackbar floats above viewer bottom controls
+            previewLightboxState != null -> if (isViewerUiActive) 100.dp else 36.dp
+            // Viewer closed: account for FAB if visible
+            fabVisible && selectedTab == "collections" ->
+                trueBottomBarHeight + gapBetweenNavAndFab + exactFabHeight + 16.dp
+            else -> trueBottomBarHeight + 16.dp
         },
         animationSpec = spring(
             dampingRatio = Spring.DampingRatioLowBouncy,
@@ -220,7 +239,104 @@ fun DashboardScreen(
             }
             pendingDeletions.clear()
             cachedProjectTiles.clear()
+            // Finalize any in-flight tile deletions from the preview lightbox
+            activeTileDeletionJob?.cancel()
+            pendingTileDeletions.forEach { (_, tile) -> onDeleteTileConfirm(tile) }
+            pendingTileDeletions.clear()
         }
+    }
+
+    // ── Tile delete handler (for preview lightbox) ──────────────────────────
+    val handleTileDeletion: (BentoEntity) -> Unit = { tile ->
+        activeTileDeletionJob?.cancel()
+        onDeleteTileImmediate(tile)
+        pendingTileDeletions[tile.id] = tile
+        activeTileDeletionJob = scope.launch {
+            val result = snackbarHostState.showSnackbar(
+                message = "Tile removed",
+                actionLabel = "Undo",
+                duration = SnackbarDuration.Short
+            )
+            when (result) {
+                SnackbarResult.ActionPerformed -> {
+                    triggerHaptic("TICK")
+                    onUndoDeleteTile(tile)
+                    pendingTileDeletions.remove(tile.id)
+                    // Signal to reopen the lightbox on this tile if viewer was open
+                    reopenViewerForTileId = tile.id
+                }
+                SnackbarResult.Dismissed -> {
+                    onDeleteTileConfirm(tile)
+                    kotlinx.coroutines.delay(100)
+                    pendingTileDeletions.remove(tile.id)
+                }
+            }
+            activeTileDeletionJob = null
+        }
+    }
+
+    // ── Reopen lightbox after tile undo ─────────────────────────────────────
+    LaunchedEffect(reopenViewerForTileId, pendingTileDeletions.size) {
+        val id = reopenViewerForTileId ?: return@LaunchedEffect
+        val currentTiles = previewLightboxState?.second ?: return@LaunchedEffect
+        val restoredTile = currentTiles.firstOrNull { it.id == id }
+        if (restoredTile != null) {
+            // Force lightbox to refresh by resetting previewLightboxState
+            previewLightboxState = Pair(restoredTile, currentTiles)
+        }
+        reopenViewerForTileId = null
+    }
+
+    // ── Return signal from AddTileScreen (edit from lightbox) ───────────────
+    // allGalleryImages must be declared before this effect so the "updated" handler can use it
+    val allGalleryImages by viewModel.allGalleryImages.collectAsState()
+
+    val navBackStackEntry = navController.currentBackStackEntry
+    val tileAction by (navBackStackEntry?.savedStateHandle
+        ?.getStateFlow<String?>("tile_action", null)
+        ?.collectAsState() ?: remember { mutableStateOf(null) })
+
+    // ── Signal from AddTileScreen: just clear the signal and show snackbar ─────────────
+    LaunchedEffect(tileAction) {
+        tileAction?.let { action ->
+            when (action) {
+                "updated" -> {
+                    snackbarHostState.showSnackbar(
+                        message = "Tile settings updated",
+                        duration = SnackbarDuration.Short
+                    )
+                }
+            }
+            navBackStackEntry?.savedStateHandle?.set("tile_action", null)
+        }
+    }
+
+    // ── Reopen lightbox after edit — fires whenever allGalleryImages refreshes ────────
+    // Matches detail screen: LaunchedEffect(imageTiles, reopenViewerForTileId)
+    // Runs again when DB emits fresh tile data AFTER save, solving the timing race.
+    LaunchedEffect(allGalleryImages, reopenViewerForTileId) {
+        val id = reopenViewerForTileId ?: return@LaunchedEffect
+        if (!editedFromViewer) return@LaunchedEffect
+        val fallback = reopenViewerFallbackIndex ?: 0
+        val projectId = previewLightboxState?.second?.firstOrNull()?.projectId
+            ?: return@LaunchedEffect
+
+        val snapshot: List<BentoEntity> = allGalleryImages
+        val freshTiles = snapshot.filter { e: BentoEntity ->
+            e.projectId == projectId && !e.imageUri.isNullOrEmpty()
+        }
+        val targetTile = freshTiles.firstOrNull { e: BentoEntity -> e.id == id }
+            ?: freshTiles.getOrNull(fallback.coerceIn(0, freshTiles.lastIndex.coerceAtLeast(0)))
+
+        previewLightboxState = if (targetTile != null && freshTiles.isNotEmpty()) {
+            Pair(targetTile, freshTiles)
+        } else {
+            null  // No images left — close gracefully
+        }
+
+        reopenViewerForTileId = null
+        reopenViewerFallbackIndex = null
+        editedFromViewer = false
     }
 
     val visibleProjects by remember(projects, pendingDeletions.size, searchQuery, isSearchActive, selectedTab) {
@@ -243,12 +359,15 @@ fun DashboardScreen(
     }
 
     val isLoading by viewModel.isLoading.collectAsState()
-    val allGalleryImages by viewModel.allGalleryImages.collectAsState()
     val projectTilesMap = remember(allGalleryImages) {
         allGalleryImages.groupBy { it.projectId }
     }
     val collapsedProjectIds by viewModel.collapsedProjectIds.collectAsState()
-    var previewLightboxState by remember { mutableStateOf<Pair<BentoEntity, List<BentoEntity>>?>(null) }
+
+    // Filter pending-deleted tiles out of the active lightbox tile list
+    val filteredLightboxTiles = remember(previewLightboxState, pendingTileDeletions.size) {
+        previewLightboxState?.second?.filter { it.id !in pendingTileDeletions.keys }
+    }
 
     Box(
         modifier = Modifier
@@ -407,30 +526,6 @@ fun DashboardScreen(
             }
         }
 
-        // ── Snackbar ──
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(bottom = snackbarBottomPadding), // Perfect mathematical offset
-            contentAlignment = Alignment.BottomCenter
-        ) {
-            SnackbarHost(
-                hostState = snackbarHostState,
-            ) { data ->
-                val isDelete = data.visuals.message.contains("removed")
-                Snackbar(
-                    snackbarData = data,
-                    modifier = Modifier.padding(horizontal = 16.dp),
-                    shape = RoundedCornerShape(16.dp),
-                    containerColor = if (isDelete) MaterialTheme.colorScheme.errorContainer
-                    else MaterialTheme.colorScheme.primaryContainer,
-                    contentColor = if (isDelete) MaterialTheme.colorScheme.onErrorContainer
-                    else MaterialTheme.colorScheme.onPrimaryContainer,
-                    actionColor = if (isDelete) MaterialTheme.colorScheme.error
-                    else MaterialTheme.colorScheme.primary
-                )
-            }
-        }
 
         // ── Add Dialog ──
         if (showAddDialog) {
@@ -642,18 +737,67 @@ fun DashboardScreen(
         }
 
         // ── Preview Reel Lightbox ──
-        previewLightboxState?.let { (clickedTile, collectionTiles) ->
-            val initialIndex = collectionTiles.indexOfFirst { it.id == clickedTile.id }.coerceAtLeast(0)
+        val activeLightboxTiles = filteredLightboxTiles
+        if (previewLightboxState != null && !activeLightboxTiles.isNullOrEmpty()) {
+            val clickedTile = previewLightboxState!!.first
+            val initialIndex = activeLightboxTiles
+                .indexOfFirst { it.id == clickedTile.id }
+                .let { if (it == -1) 0 else it }
             BentoLightbox(
-                titles = collectionTiles.map { it.title ?: "" },
-                imagePaths = collectionTiles.map { it.imageUri ?: "" },
+                titles = activeLightboxTiles.map { it.title ?: "" },
+                imagePaths = activeLightboxTiles.map { it.imageUri ?: "" },
                 initialIndex = initialIndex,
                 initialStatusBarVisible = true,
-                onUiVisibilityChange = {},
-                onEdit = {},
-                onDelete = {},
-                onDismiss = { previewLightboxState = null }
+                onUiVisibilityChange = { isViewerUiActive = it },
+                onEdit = { index ->
+                    val tile = activeLightboxTiles.getOrNull(index) ?: return@BentoLightbox
+                    // Store reopen info — same pattern as CollectionDetailScreen
+                    reopenViewerForTileId = tile.id
+                    reopenViewerFallbackIndex = index
+                    editedFromViewer = true
+                    onEditTileClick(tile.projectId, tile.id)
+                },
+                onDelete = { index ->
+                    val tile = activeLightboxTiles.getOrNull(index) ?: return@BentoLightbox
+                    if (activeLightboxTiles.size <= 1) previewLightboxState = null
+                    handleTileDeletion(tile)
+                },
+                onDismiss = {
+                    previewLightboxState = null
+                    isViewerUiActive = false
+                }
             )
+        }
+
+        // ── Snackbar — AFTER lightbox so it renders on top of it ──────────────
+        // In a Box, later children appear above earlier ones.
+        // Padding animates between 3 states matching the detail screen logic:
+        //   • Lightbox open + controls visible → above lightbox bottom controls
+        //   • Lightbox open + controls hidden  → minimal clearance from edge
+        //   • Lightbox closed + FAB visible    → above FAB + nav
+        //   • Lightbox closed + no FAB         → above nav only
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(bottom = snackbarBottomPadding),
+            contentAlignment = Alignment.BottomCenter
+        ) {
+            SnackbarHost(
+                hostState = snackbarHostState,
+            ) { data ->
+                val isDelete = data.visuals.message.contains("removed")
+                Snackbar(
+                    snackbarData = data,
+                    modifier = Modifier.padding(horizontal = 16.dp),
+                    shape = RoundedCornerShape(16.dp),
+                    containerColor = if (isDelete) MaterialTheme.colorScheme.errorContainer
+                    else MaterialTheme.colorScheme.primaryContainer,
+                    contentColor = if (isDelete) MaterialTheme.colorScheme.onErrorContainer
+                    else MaterialTheme.colorScheme.onPrimaryContainer,
+                    actionColor = if (isDelete) MaterialTheme.colorScheme.error
+                    else MaterialTheme.colorScheme.primary
+                )
+            }
         }
     }
 }
