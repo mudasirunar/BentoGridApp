@@ -33,7 +33,9 @@ import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
+import coil.request.CachePolicy
 import coil.request.ImageRequest
+import coil.size.Size
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import com.example.bentoapp.data.BentoEntity
@@ -415,6 +417,17 @@ fun ProjectCard(
                                     } else 1f
                                 }
 
+                                val context = LocalContext.current
+                                val imageRequest = remember(tile.imageUri) {
+                                    ImageRequest.Builder(context)
+                                        .data(tile.imageUri?.let { File(it) })
+                                        .diskCachePolicy(CachePolicy.ENABLED)
+                                        .memoryCachePolicy(CachePolicy.ENABLED)
+                                        .size(Size.ORIGINAL)
+                                        .allowHardware(true)
+                                        .crossfade(false)
+                                        .build()
+                                }
                                 Surface(
                                     shape = RoundedCornerShape(16.dp),
                                     color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.25f),
@@ -428,10 +441,7 @@ fun ProjectCard(
                                         }
                                 ) {
                                     AsyncImage(
-                                        model = ImageRequest.Builder(LocalContext.current)
-                                            .data(tile.imageUri?.let { File(it) })
-                                            .crossfade(true)
-                                            .build(),
+                                        model = imageRequest,
                                         contentDescription = null,
                                         modifier = Modifier.fillMaxSize(),
                                         contentScale = ContentScale.Crop
